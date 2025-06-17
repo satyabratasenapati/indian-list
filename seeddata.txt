@@ -1,0 +1,76 @@
+// Seed data for Bangalore for the current year (2025)
+            modelBuilder.Entity<TaxRule>().HasData(
+                // Yearly Tax for Bangalore (Full Year 2025)
+                new TaxRule
+                {
+                    Id = Guid.Parse("A0000000-0000-0000-0000-000000000001"), // Fixed GUID for seeding
+                    MunicipalityName = "Bangalore",
+                    TaxType = TaxType.Yearly,
+                    Value = 0.20M, // Adjusted to 0.2 as per your example
+                    StartDate = new DateTime(2025, 1, 1),
+                    EndDate = new DateTime(2025, 12, 31),
+                    DayOfMonth = null,
+                    DayOfWeek = null,
+                    DayOfYear = null
+                },
+                // Monthly Tax for Bangalore (Applicable for May 2025)
+                new TaxRule
+                {
+                    Id = Guid.Parse("A0000000-0000-0000-0000-000000000002"),
+                    MunicipalityName = "Bangalore",
+                    TaxType = TaxType.Monthly,
+                    Value = 0.40M, // Adjusted to 0.4 as per your example
+                    StartDate = new DateTime(2025, 5, 1),
+                    EndDate = new DateTime(2025, 5, 31),
+                    DayOfMonth = null, // Applies to the entire month of May
+                    DayOfWeek = null,
+                    DayOfYear = null
+                },
+                // Daily Tax for Bangalore (January 1st, 2025)
+                new TaxRule
+                {
+                    Id = Guid.Parse("A0000000-0000-0000-0000-000000000003"),
+                    MunicipalityName = "Bangalore",
+                    TaxType = TaxType.Daily,
+                    Value = 0.10M, // Adjusted to 0.1 as per your example
+                    StartDate = new DateTime(2025, 1, 1),
+                    EndDate = new DateTime(2025, 1, 1),
+                    DayOfMonth = null,
+                    DayOfWeek = null,
+                    DayOfYear = null
+                },
+                // Daily Tax for Bangalore (December 25th, 2025)
+                new TaxRule
+                {
+                    Id = Guid.Parse("A0000000-0000-0000-0000-000000000004"),
+                    MunicipalityName = "Bangalore",
+                    TaxType = TaxType.Daily,
+                    Value = 0.10M, // Adjusted to 0.1 as per your example
+                    StartDate = new DateTime(2025, 12, 25),
+                    EndDate = new DateTime(2025, 12, 25),
+                    DayOfMonth = null,
+                    DayOfWeek = null,
+                    DayOfYear = null
+                }
+                // No Weekly Tax as per your example
+            );
+
+
+
+            // --- Seed data for Municipalities ---
+            modelBuilder.Entity<Municipality>().HasData(
+                new Municipality { Id = 1, Name = "Copenhagen" },
+                new Municipality { Id = 2, Name = "Aarhus" },
+                new Municipality { Id = 3, Name = "Odense" },
+                new Municipality { Id = 4, Name = "Roskilde" },
+                new Municipality { Id = 5, Name = "Bangalore" }, // Indian cities
+                new Municipality { Id = 6, Name = "Mumbai" },
+                new Municipality { Id = 7, Name = "Delhi" },
+                new Municipality { Id = 8, Name = "Chennai" },
+                new Municipality { Id = 9, Name = "Hyderabad" },
+                new Municipality { Id = 10, Name = "Kolkata" },
+                new Municipality { Id = 11, Name = "Pune" },
+                new Municipality { Id = 12, Name = "Ahmedabad" },
+                new Municipality { Id = 13, Name = "Jaipur" },
+                new Municipality { Id = 14, Name = "Lucknow" }
+            );
