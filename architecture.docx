@@ -1,0 +1,106 @@
+Architecture Overview: Layered (N-Tier) with Domain-Driven Design (DDD) principles
+The proposed architecture is a Layered Architecture, often referred to as N-Tier Architecture for larger systems, specifically focusing on Clean Architecture principles and incorporating elements of Domain-Driven Design (DDD). This approach prioritizes the business domain, making the core logic independent of infrastructure and UI concerns, leading to a highly maintainable, testable, and scalable application.
+
+Key Architectural Principles:
+
+Separation of Concerns: Each layer has a distinct responsibility.
+Dependency Rule (Inward Dependencies): Dependencies flow inwards. The outer layers depend on inner layers, but inner layers have no knowledge of outer layers. This means the Domain layer has no dependencies on Application or Infrastructure, and Application has no dependencies on Infrastructure.
+Testability: Core business logic (Domain and Application layers) can be tested in isolation without needing a database or UI.
+Maintainability: Changes in one layer (e.g., swapping databases) have minimal impact on other layers.
+Flexibility: Adapters (like Infrastructure) can be easily swapped.
+Architectural Layers and Their Responsibilities
+We will organize the solution into several distinct projects (layers), each serving a specific purpose:
+
+MunicipalityTax.Domain (Core Business Logic & Entities)
+
+Explanation: This is the innermost layer and the heart of the application. It contains the fundamental business logic, entities, value objects, and domain events. It is completely independent of any other layer, meaning it has no dependencies on Application or Infrastructure.
+Responsibilities:
+Defining the core Municipality and TaxRule entities.
+Defining value objects (if any, like a DateRange struct).
+Defining domain events (if any complex interactions).
+Defining core enums (TaxType).
+Defining interfaces for repositories (IMunicipalityTaxRepository) and potentially other domain services that require interaction with the outside world (DIP in action here).
+Design Patterns/Principles Applied:
+SRP: Entities focus on their data and behavior.
+DIP: Interfaces for external dependencies (like repositories) are defined here.
+Encapsulation: Entities protect their internal state.
+What needs to be done:
+Create Municipality.cs, TaxRule.cs (with properties as defined before, including TaxType, StartDate, EndDate, DayOfMonth, DayOfWeek, DayOfYear).
+Create TaxType.cs enum.
+Create IMunicipalityTaxRepository.cs interface.
+(Optional, but good practice): Create ITaxCalculationStrategy.cs interface here or in Application layer if the strategies are very domain-specific. For this case, keeping it in Application is fine.
+MunicipalityTax.Application (Application Logic & Use Cases)
+
+Explanation: This layer orchestrates the domain entities to perform specific use cases or application-specific business rules. It acts as an intermediary between the UI/API and the domain layer. It defines DTOs (Data Transfer Objects) for input (commands) and output (queries) and uses interfaces defined in the Domain or its own layer. It has a dependency on the Domain layer.
+Responsibilities:
+Implementing the TaxCalculationService that consumes IMunicipalityTaxRepository and the ITaxCalculationStrategy implementations.
+Implementing the MunicipalityManagementService for adding, importing, and updating tax rules.
+Defining AddTaxRuleCommand, UpdateTaxRuleCommand, TaxRuleImportDto, etc.
+Defining and implementing ITaxImporter interface and ITaxCalculationStrategy interface/implementations (Strategy Pattern).
+Design Patterns/Principles Applied:
+SRP: Services have a single, well-defined application-level responsibility (e.g., calculate tax, manage municipalities).
+OCP: New tax types can be added by implementing new ITaxCalculationStrategy without modifying existing services. New import formats by new ITaxImporter implementations.
+DIP: Services depend on IMunicipalityTaxRepository (abstraction from Domain), ITaxImporter (abstraction defined here), and ITaxCalculationStrategy (abstractions defined here).
+Strategy Pattern: For flexible and extensible tax calculation logic.
+Command/Query (CQRS Lite): Commands for modifying state (e.g., AddTaxRuleCommand) and queries for retrieving data (implicitly, CalculateTaxForDateAsync).
+What needs to be done:
+Create Services folder: TaxCalculationService.cs, MunicipalityManagementService.cs.
+Create Strategies folder: ITaxCalculationStrategy.cs, YearlyTaxStrategy.cs, MonthlyTaxStrategy.cs, WeeklyTaxStrategy.cs, DailyTaxStrategy.cs.
+Create Commands folder: AddTaxRuleCommand.cs, UpdateTaxRuleCommand.cs.
+Create DTOs folder: TaxRuleImportDto.cs.
+Create ITaxImporter.cs.
+Implement the logic for all these classes/interfaces.
+MunicipalityTax.Infrastructure (Data Access & External Services)
+
+Explanation: This layer contains the implementations of interfaces defined in the Domain and Application layers. It handles details of interacting with databases, file systems, external APIs, etc. It depends on the Domain layer (to work with domain entities) and often implicitly on Application (to implement ITaxImporter).
+Responsibilities:
+Implementing IMunicipalityTaxRepository using Entity Framework Core (EF Core) and SQLite.
+Setting up the ApplicationDbContext for EF Core.
+Configuring EF Core migrations.
+Implementing ITaxImporter (e.g., CsvTaxImporter).
+(If needed): Implementing any other external services (e.g., a notification service if the app sends alerts).
+Design Patterns/Principles Applied:
+SRP: Focus on specific infrastructure concerns (database access, file parsing).
+DIP: Implements interfaces defined in higher layers, ensuring loose coupling.
+Repository Pattern: Concrete implementation of data access abstraction.
+What needs to be done:
+Create ApplicationDbContext.cs for EF Core, including DbSets for Municipality and TaxRule, and OnModelCreating for schema configuration and initial data seeding.
+Create Repositories folder: MunicipalityTaxRepository.cs (implementing IMunicipalityTaxRepository).
+Create FileImporters folder: CsvTaxImporter.cs (implementing ITaxImporter).
+Configure appsettings.json with database connection strings.
+MunicipalityTax.API (Presentation / Producer Service)
+
+Explanation: This is the outermost layer and the entry point for requests into the application. It exposes the application's functionality via a RESTful API. It depends on the Application layer to use its services and orchestrates dependency injection for the entire application.
+Responsibilities:
+Hosting the ASP.NET Core Web API.
+Defining API endpoints (Controllers) for operations like GET /api/Tax/{municipalityName}/{date}, POST /api/Municipality/taxrule, POST /api/Municipality/import, PUT /api/Municipality/taxrule/{ruleId}.
+Handling HTTP requests and responses.
+Translating incoming request data (from HTTP) into application commands/DTOs and translating application results back into HTTP responses.
+Configuring Dependency Injection for all layers.
+Configuring logging, error handling middleware, and API documentation (Swagger/OpenAPI).
+Design Patterns/Principles Applied:
+SRP: Controllers focus solely on HTTP concerns (routing, request parsing, response formatting).
+DIP: Controllers depend on TaxCalculationService and MunicipalityManagementService (abstractions exposed by the Application layer via DI).
+Dependency Injection Container: Manages the lifecycle and resolution of all dependencies.
+What needs to be done:
+Create Controllers folder: TaxController.cs, MunicipalityController.cs.
+Set up Program.cs for:
+Configuring logging (e.g., Serilog).
+Configuring EF Core and database context.
+Registering all services, repositories, and strategies with the DI container.
+Adding Swagger/OpenAPI.
+Implementing global error handling middleware.
+Ensure proper routing and HTTP verb usage (GET, POST, PUT).
+MunicipalityTax.Consumer (Demonstration / Client Service)
+
+Explanation: This is a separate console application that acts as a client to demonstrate how to interact with the MunicipalityTax.API. It makes HTTP requests to the exposed endpoints. It has no direct knowledge of the internal architecture of the MunicipalityTax.API beyond its public API contract.
+Responsibilities:
+Making HTTP calls to the MunicipalityTax.API endpoints.
+Parsing API responses.
+Demonstrating the GetTax, AddTaxRule, and ImportTaxes functionalities.
+Design Patterns/Principles Applied:
+Client-Server: Clearly demonstrates the interaction between a client and a service.
+What needs to be done:
+Create a console application Program.cs.
+Use HttpClient to make requests.
+Implement methods for calling each relevant API endpoint.
