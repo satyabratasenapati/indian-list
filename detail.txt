@@ -103,3 +103,9 @@
 * **Global Error Handling:** Centralized exception handling for consistent API responses.
 * **Serilog:** Powerful and flexible logging framework.
 * **AutoMapper:** Streamlines object mapping, reducing boilerplate and improving maintainability.
+
+
+
+Add-Migration InitialCreate -Project MunicipalityTax.Infrastructure -StartupProject MunicipalityTax.API
+
+Update-Database -Project MunicipalityTax.Infrastructure -StartupProject MunicipalityTax.API
