@@ -1,0 +1,12 @@
+MunicipalityName,Type,TaxValue,StartDate,EndDate,DayOfMonth,DayOfWeek,DayOfYear
+Bangalore,Yearly,0.15,2024-01-01,2024-12-31,,,
+Bangalore,Monthly,0.04,2024-01-01,2024-12-31,1,,
+Bangalore,Daily,0.015,2024-01-01,2024-12-31,,,
+Mumbai,Yearly,0.18,2024-01-01,2024-12-31,,,
+Mumbai,Monthly,0.05,2024-01-01,2024-12-31,5,,
+Delhi,Yearly,0.16,2024-01-01,2024-12-31,,,
+Delhi,Daily,0.02,2024-08-15,2024-08-15,,,
+Delhi,Daily,0.025,2024-01-26,2024-01-26,,,
+Chennai,Weekly,0.035,2024-01-01,2024-12-31,,2,
+Hyderabad,Monthly,0.045,2024-01-01,2024-12-31,15,,
+Kolkata,Yearly,0.17,2024-01-01,2024-12-31,,,
