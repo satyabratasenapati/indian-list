@@ -113,29 +113,52 @@ Update-Database -Project MunicipalityTax.Infrastructure -StartupProject Municipa
 
 
 
-// Order of precedence: Daily > Weekly > Monthly > Yearly
-            // This is crucial for correct tax calculation based on specificity.
-            var orderedRules = municipality.TaxRules
-                .OrderByDescending(r => r.Type == TaxType.Daily)
-                .ThenByDescending(r => r.Type == TaxType.Weekly)
-                .ThenByDescending(r => r.Type == TaxType.Monthly)
-                .ThenByDescending(r => r.Type == TaxType.Yearly)
-                .ToList(); // Materialize to list for efficient iteration
-
-            foreach (var rule in orderedRules)
+// If DayOfMonth is specified, the rule is only applicable on that specific day of the month.
+            // Otherwise, it applies to any day within the month range.
+            if (rule.DayOfMonth.HasValue)
             {
-                // Find the specific strategy for the current rule's type
-                var strategy = _taxStrategies.FirstOrDefault(s => s.Type == rule.Type);
-
-                if (strategy != null && strategy.IsApplicable(rule, date))
-                {
-                    var tax = strategy.CalculateTax(rule, date);
-                    _logger.LogInformation("Calculated tax for municipality '{MunicipalityName}' on {Date} is {TaxValue} using {RuleType} rule.",
-                        municipalityName, date.ToShortDateString(), tax, rule.Type);
-                    return tax; // Return the first applicable tax (due to ordering, this will be the most specific)
-                }
+                return rule.DayOfMonth.Value == date.Day;
             }
 
-            _logger.LogInformation("No applicable tax rule found for municipality '{MunicipalityName}' on {Date}. Returning 0.",
-                municipalityName, date.ToShortDateString());
-            return 0m; // No applicable rule found for the given date
+            return true; // Applies 
+
+
+
+public bool IsApplicable(TaxRule rule, DateTime date)
+        {
+            if (date < rule.StartDate || date > rule.EndDate)
+            {
+                return false; // Not within the general date range
+            }
+
+            // This rule is only applicable if DayOfWeek is specified AND it matches the current date's DayOfWeek.
+            // Weekly rules *always* imply a specific day of the week.
+            if (rule.DayOfWeek.HasValue)
+            {
+                return (int)rule.DayOfWeek.Value == (int)date.DayOfWeek;
+            }
+
+            // If a Weekly rule is defined without DayOfWeek, it's an invalid state or implies
+            // it applies every day of the week for its period. For strict weekly, DayOfWeek must be set.
+            // We'll return false if DayOfWeek is missing for a Weekly rule for strictness.
+            return false;
+        }
+
+
+public bool IsApplicable(TaxRule rule, DateTime date)
+        {
+            if (date < rule.StartDate || date > rule.EndDate)
+            {
+                return false; // Not within the general date range
+            }
+
+            // If DayOfYear is specified, the rule is only applicable on that specific day of the year.
+            if (rule.DayOfYear.HasValue)
+            {
+                return rule.DayOfYear.Value == date.DayOfYear;
+            }
+
+            // If no DayOfYear is specified, it means the daily rule applies for every day
+            // within its StartDate and EndDate range.
+            return true;
+        }
