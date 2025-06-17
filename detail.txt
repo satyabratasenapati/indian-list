@@ -1,0 +1,105 @@
+## Technologies Used
+
+* .NET 8.0
+* ASP.NET Core Web API
+* Entity Framework Core (with SQLite by default, configurable for SQL Server)
+* Serilog for Logging
+* Swashbuckle.AspNetCore for Swagger/OpenAPI
+* Microsoft.AspNetCore.RateLimiting for API rate limiting
+* Microsoft.AspNetCore.ResponseCompression for HTTP response compression
+* CsvHelper for CSV file parsing
+* AutoMapper for object mapping
+* Azure.Storage.Blobs (optional, for Azure Blob file source)
+
+## Getting Started
+
+### Prerequisites
+
+* .NET 8.0 SDK installed
+* Visual Studio 2022 (recommended) or VS Code with C# extensions.
+* Basic understanding of SQL migrations.
+
+### Setup Steps
+
+1.  **Clone the Repository (or create manually):**
+    If you're following the manual creation, ensure you have created the solution and projects as specified in the initial setup instructions.
+
+2.  **Add Project References:**
+    Ensure all projects have the correct references as outlined in the "Setup Instructions" section above.
+
+3.  **Install NuGet Packages:**
+    Ensure all necessary NuGet packages are installed for each project as listed in the "Setup Instructions". **Remember to add `AutoMapper.Extensions.Microsoft.DependencyInjection` to `MunicipalityTax.Application` project.**
+
+4.  **Database Migration:**
+    * Open **Package Manager Console** in Visual Studio (`Tools > NuGet Package Manager > Package Manager Console`).
+    * Select `MunicipalityTax.Infrastructure` as the **Default project** in the dropdown.
+    * Run the following commands:
+        ```powershell
+        Add-Migration InitialCreate # Or a new name like AddAutoMapperMappers if you already ran InitialCreate
+        Update-Database
+        ```
+        This will create the `municipality_taxes.db` SQLite file in your `MunicipalityTax.API` project's root directory (or equivalent for other DBs) and seed initial data.
+
+5.  **Configure `appsettings.json` (Optional - for different DB/Cloud Storage):**
+    * Open `MunicipalityTax.API/appsettings.json`.
+    * To switch database, change `"DatabaseProvider"` to `"SqlServer"` and update `"SqlServerConnection"` string.
+    * To enable Azure Blob import, uncomment the `AzureBlobStorage` connection string and `FileSourceProviders:AzureBlob:ContainerName` and populate with your Azure Storage details.
+
+### Running the Application
+
+1.  **Set Startup Project:**
+    * In Solution Explorer, right-click the `MunicipalityTax.API` project and select "Set as Startup Project".
+
+2.  **Run API:**
+    * Press `F5` or `Ctrl+F5` (Start Without Debugging) in Visual Studio.
+    * The API will launch, and Swagger UI will open in your default browser (typically at `https://localhost:7001/swagger`).
+
+3.  **Explore API with Swagger UI:**
+    * You can now interact with the API endpoints directly from the Swagger UI. Try:
+        * `GET /api/Tax/{municipalityName}/{date}`
+        * `POST /api/Municipality/taxrule`
+        * `PUT /api/Municipality/taxrule/{ruleId}`
+        * `POST /api/Municipality/import` (for file import)
+
+4.  **Run Consumer Application:**
+    * Right-click the `MunicipalityTax.Consumer` project and select "Set as Startup Project".
+    * Run the consumer application (F5 or Ctrl+F5). This will execute a series of API calls and print the results to the console.
+    * **Important:** The consumer expects a `sample_taxes.csv` file. A helper method in `MunicipalityTax.Consumer/Program.cs` will attempt to create this file in the consumer's executable directory if it doesn't exist. You can manually create it or modify the path in the `Program.cs`.
+
+## API Endpoints
+
+* **GET /api/Tax/{municipalityName}/{date}**
+    * Calculates the tax for a given municipality on a specific date.
+    * Example: `https://localhost:7001/api/Tax/Bangalore/2024-07-10`
+
+* **POST /api/Municipality/taxrule**
+    * Adds a new tax rule for a municipality.
+    * Request Body (JSON): `AddTaxRuleCommand`
+
+* **PUT /api/Municipality/taxrule/{ruleId}**
+    * Updates an existing tax rule.
+    * Request Body (JSON): `UpdateTaxRuleCommand`
+
+* **POST /api/Municipality/import**
+    * Imports tax rules from a file source.
+    * Request Body (JSON): `ImportTaxesRequest`
+        ```json
+        {
+          "identifier": "path/to/your/file.csv", // e.g., "C:\\temp\\taxes.csv" or "my_blob.csv"
+          "fileSourceProviderName": "LocalFile" // or "AzureBlob"
+        }
+        ```
+
+## Best Practices Implemented
+
+* **Clean Architecture:** Clear separation of concerns, high cohesion, low coupling.
+* **Dependency Injection:** Services and repositories are registered and injected.
+* **Strategy Pattern:** For extensible tax calculation logic.
+* **Repository Pattern:** Abstracts data access details.
+* **Generic Configuration:** Database provider and logging setup are driven by configuration.
+* **XML Documentation:** Provides rich API documentation in Swagger.
+* **Rate Limiting:** Protects the API from excessive requests.
+* **Response Compression:** Optimizes network traffic for faster client responses.
+* **Global Error Handling:** Centralized exception handling for consistent API responses.
+* **Serilog:** Powerful and flexible logging framework.
+* **AutoMapper:** Streamlines object mapping, reducing boilerplate and improving maintainability.
