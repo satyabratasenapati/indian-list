@@ -109,3 +109,97 @@
 Add-Migration InitialCreate -Project MunicipalityTax.Infrastructure -StartupProject MunicipalityTax.API
 
 Update-Database -Project MunicipalityTax.Infrastructure -StartupProject MunicipalityTax.API
+
+
+
+
+private int GetTaxTypePrecedence(TaxType type)
+        {
+            return type switch
+            {
+                TaxType.Daily => 4,   // Highest precedence
+                TaxType.Weekly => 3,  // Next highest
+                TaxType.Monthly => 2, // Next
+                TaxType.Yearly => 1,  // Lowest precedence (default)
+                _ => 0 // Should not occur for defined TaxTypes
+            };
+        }
+
+        public async Task<decimal?> GetTaxAsync(string municipalityName, DateTime date)
+        {
+            var allRules = await _municipalityTaxRepository.GetAllTaxRulesAsync();
+
+            var applicableRules = allRules
+                .Where(r => r.MunicipalityName.Equals(municipalityName, StringComparison.OrdinalIgnoreCase) &&
+                            date >= r.StartDate && date <= r.EndDate)
+                .ToList();
+
+            if (!applicableRules.Any())
+            {
+                return 0.0m; // No rule found for the given municipality and date
+            }
+
+            // 1. Order rules by their general TaxType precedence (Daily > Weekly > Monthly > Yearly)
+            // 2. Then, within the same TaxType precedence, order by specific day matches (e.g., a Monthly rule for DayOfMonth=1 is more specific than a Monthly rule for the whole month).
+            var mostSpecificRule = applicableRules
+                .OrderByDescending(r => GetTaxTypePrecedence(r.TaxType)) // Apply the custom precedence
+                .ThenByDescending(r =>
+                {
+                    // Assign a score for exact day matches within their tax type
+                    if (r.TaxType == TaxType.Daily && r.DayOfYear.HasValue && r.DayOfYear.Value == date.DayOfYear) return 1;
+                    if (r.TaxType == TaxType.Monthly && r.DayOfMonth.HasValue && r.DayOfMonth.Value == date.Day) return 1;
+                    if (r.TaxType == TaxType.Weekly && r.DayOfWeek.HasValue && r.DayOfWeek.Value == date.DayOfWeek) return 1;
+                    return 0; // No specific day match for this rule or type doesn't have such specificity
+                })
+                .FirstOrDefault();
+
+            // --- Refined Logic to handle "Specific Day" rules that don't match the current date's day ---
+            // The `OrderBy` above will pick the highest precedence *TaxType*.
+            // However, a rule like "Daily on DayOfYear 100" should *not* apply on DayOfYear 200,
+            // even if "Daily" is the highest type precedence. These `if` blocks ensure that
+            // if the selected "most specific" rule *requires* a specific day match (DayOfMonth/DayOfWeek/DayOfYear)
+            // and that match fails, we re-evaluate and find the next best rule.
+
+            // If the initially chosen rule is Daily and it specifies a DayOfYear, but that DayOfYear doesn't match the current date
+            if (mostSpecificRule?.TaxType == TaxType.Daily && mostSpecificRule.DayOfYear.HasValue && mostSpecificRule.DayOfYear.Value != date.DayOfYear)
+            {
+                // Exclude this specific daily rule and find the next most specific rule from the rest
+                mostSpecificRule = applicableRules
+                    .Where(r => r.Id != mostSpecificRule.Id) // Exclude the rule that failed its specific day match
+                    .OrderByDescending(r => GetTaxTypePrecedence(r.TaxType))
+                    .ThenByDescending(r =>
+                    {
+                        if (r.TaxType == TaxType.Monthly && r.DayOfMonth.HasValue && r.DayOfMonth.Value == date.Day) return 1;
+                        if (r.TaxType == TaxType.Weekly && r.DayOfWeek.HasValue && r.DayOfWeek.Value == date.DayOfWeek) return 1;
+                        return 0;
+                    })
+                    .FirstOrDefault();
+            }
+
+            // If the (potentially re-evaluated) chosen rule is Monthly and it specifies a DayOfMonth, but that DayOfMonth doesn't match the current date
+            if (mostSpecificRule?.TaxType == TaxType.Monthly && mostSpecificRule.DayOfMonth.HasValue && mostSpecificRule.DayOfMonth.Value != date.Day)
+            {
+                // Exclude this specific monthly rule and find the next most specific rule
+                mostSpecificRule = applicableRules
+                    .Where(r => r.Id != mostSpecificRule.Id)
+                    .OrderByDescending(r => GetTaxTypePrecedence(r.TaxType))
+                    .ThenByDescending(r =>
+                    {
+                        if (r.TaxType == TaxType.Weekly && r.DayOfWeek.HasValue && r.DayOfWeek.Value == date.DayOfWeek) return 1;
+                        return 0;
+                    })
+                    .FirstOrDefault();
+            }
+
+            // If the (potentially re-evaluated) chosen rule is Weekly and it specifies a DayOfWeek, but that DayOfWeek doesn't match the current date
+            if (mostSpecificRule?.TaxType == TaxType.Weekly && mostSpecificRule.DayOfWeek.HasValue && mostSpecificRule.DayOfWeek.Value != date.DayOfWeek)
+            {
+                // Exclude this specific weekly rule and find the next most specific rule (which would likely be Yearly)
+                mostSpecificRule = applicableRules
+                    .Where(r => r.Id != mostSpecificRule.Id)
+                    .OrderByDescending(r => GetTaxTypePrecedence(r.TaxType))
+                    .FirstOrDefault(); // No further specificity checks needed here, as Yearly has no specific day props
+            }
+
+            return mostSpecificRule?.Value ?? 0.0m;
+        }
