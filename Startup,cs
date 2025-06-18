@@ -1,83 +1,95 @@
-// MunicipalityTax.API/Startup.cs
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.EntityFrameworkCore;
-using MunicipalityTax.Application.Interfaces;
-using MunicipalityTax.Application.Mappers;
-using MunicipalityTax.Application.Services;
-using MunicipalityTax.Application.Strategies;
-using MunicipalityTax.Domain.Interfaces;
-using MunicipalityTax.Infrastructure.Data;
-using MunicipalityTax.Infrastructure.FileImporters;
-using MunicipalityTax.Infrastructure.FileSourceProviders;
-using MunicipalityTax.Infrastructure.Repositories;
-using System.IO;
+// MunicipalityTax.ServiceHost/Program.cs
+using Microsoft.AspNetCore.Hosting; // For ConfigureWebHostDefaults
+using Microsoft.Extensions.Hosting; // For Host.CreateDefaultBuilder
+using Microsoft.Extensions.Hosting.WindowsServices; // For UseWindowsService()
+using MunicipalityTax.API; // Reference your API's namespace and Startup class
+using Microsoft.EntityFrameworkCore; // For Migrate
+using Microsoft.Extensions.DependencyInjection; // For CreateScope and GetRequiredService
+using MunicipalityTax.Infrastructure.Data; // For ApplicationDbContext
 
-namespace MunicipalityTax.API
+namespace MunicipalityTax.ServiceHost
 {
-    public class Startup
+    public class Program
     {
-        public Startup(IConfiguration configuration)
+        public static void Main(string[] args)
         {
-            Configuration = configuration;
-        }
+            // Create the host builder for the application.
+            var builder = Host.CreateDefaultBuilder(args);
 
-        public IConfiguration Configuration { get; }
-
-        // This method gets called by the runtime. Use this method to add services to the container.
-        public void ConfigureServices(IServiceCollection services)
-        {
-            services.AddControllers();
-            services.AddEndpointsApiExplorer();
-            services.AddSwaggerGen();
-
-            // Configure DbContext
-            services.AddDbContext<ApplicationDbContext>(options =>
-                options.UseSqlServer(Configuration.GetConnectionString("DefaultConnection")));
-
-            // Register Repositories
-            services.AddScoped<IMunicipalityTaxRepository, MunicipalityTaxRepository>();
-
-            // Register Application Services
-            services.AddScoped<TaxCalculationService>();
-            services.AddScoped<MunicipalityManagementService>();
-
-            // Register Tax Calculation Strategies
-            services.AddScoped<ITaxCalculationStrategy, DailyTaxStrategy>();
-            services.AddScoped<ITaxCalculationStrategy, MonthlyTaxStrategy>();
-            services.AddScoped<ITaxCalculationStrategy, WeeklyTaxStrategy>();
-            services.AddScoped<ITaxCalculationStrategy, YearlyTaxStrategy>();
-
-            // Register File Importer and File Source Providers
-            services.AddScoped<ITaxImporter, CsvTaxImporter>();
-            services.AddTransient<IFileSourceProvider>(sp =>
-                new LocalFileSourceProvider(Path.Combine(Directory.GetCurrentDirectory(), "Files")));
-
-            // Configure AutoMapper
-            services.AddAutoMapper(typeof(TaxRuleProfile).Assembly);
-        }
-
-        // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
-        public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
-        {
-            if (env.IsDevelopment())
+            // Configure the host to run as a Windows Service.
+            // This enables integration with the Windows Service Control Manager.
+            builder.UseWindowsService(options =>
             {
-                app.UseSwagger();
-                app.UseSwaggerUI();
-                // Migrations are handled by Program.cs now (or can be done here explicitly if needed)
+                // Optional: Set a custom service name and display name.
+                // If not set, it defaults to the assembly name.
+                options.ServiceName = "MunicipalityTaxApiService";
+            });
+
+            // Configure the web host defaults for your MunicipalityTax.API.
+            // This is where you tell the service host to run your API application.
+            builder.ConfigureWebHostDefaults(webBuilder =>
+            {
+                // This tells the web host to use the 'Startup' class from your
+                // MunicipalityTax.API project to configure the web application's
+                // services, middleware pipeline, controllers, etc.
+                webBuilder.UseStartup<Startup>(); // Refers to MunicipalityTax.API.Startup
+
+                // Kestrel (the ASP.NET Core web server) will pick up its
+                // listening URLs (e.g., http://*:5000) from the appsettings.json
+                // located in the MunicipalityTax.ServiceHost's output directory.
+                // You do NOT need to call .UseUrls() here if configured in appsettings.json.
+            });
+
+            // Build the host.
+            var host = builder.Build();
+
+            // Apply database migrations on startup.
+            // This ensures your database schema is up-to-date when the service starts.
+            // This scope ensures the DbContext is properly disposed.
+            using (var scope = host.Services.CreateScope())
+            {
+                var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                try
+                {
+                    Console.WriteLine("Applying database migrations...");
+                    dbContext.Database.Migrate();
+                    Console.WriteLine("Database migrations applied successfully.");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error applying database migrations: {ex.Message}");
+                    // In a real-world scenario, you'd use a robust logging framework here.
+                    // Logger might not be fully initialized yet at this point for all logs.
+                }
             }
 
-            app.UseHttpsRedirection();
-            app.UseAuthorization();
-            app.UseRouting(); // Important for endpoint routing
-
-            app.UseEndpoints(endpoints =>
-            {
-                endpoints.MapControllers();
-            });
+            // Run the host. This blocks until the host is stopped.
+            host.Run();
         }
     }
+}
+
+// MunicipalityTax.ServiceHost/appsettings.json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+      "Microsoft.EntityFrameworkCore.Database.Command": "Warning" // Can set to "Information" for SQL logs
+    }
+  },
+  "AllowedHosts": "*",
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=(localdb)\\mssqllocaldb;Database=MunicipalityTaxDb;Trusted_Connection=True;MultipleActiveResultSets=true"
+  },
+  "Kestrel": {
+    "Endpoints": {
+      "Http": {
+        "Url": "http://*:5000" // Listen on all network interfaces on port 5000 for HTTP
+      },
+      "Https": {
+        "Url": "https://*:5001" // Listen on all network interfaces on port 5001 for HTTPS (requires certificate setup)
+      }
+    }
+  }
 }
