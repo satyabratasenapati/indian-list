@@ -1,0 +1,274 @@
+// MunicipalityTax.Application/Validators/UpdateTaxRuleCommandValidator.cs
+using FluentValidation;
+using MunicipalityTax.Application.Commands;
+using MunicipalityTax.Domain.Models; // Assuming TaxType enum is here
+
+namespace MunicipalityTax.Application.Validators
+{
+    public class UpdateTaxRuleCommandValidator : AbstractValidator<UpdateTaxRuleCommand>
+    {
+        public UpdateTaxRuleCommandValidator()
+        {
+            RuleFor(x => x.MunicipalityName)
+                .NotEmpty().WithMessage("Municipality name is required.")
+                .MaximumLength(100).WithMessage("Municipality name cannot exceed 100 characters.");
+
+            RuleFor(x => x.TaxType)
+                .NotEmpty().WithMessage("Tax type is required.")
+                .IsEnumName(typeof(TaxType), caseSensitive: false)
+                    .WithMessage("Invalid Tax type. Must be 'Daily', 'Weekly', 'Monthly', or 'Yearly'.");
+
+            RuleFor(x => x.TaxRate)
+                .GreaterThanOrEqualTo(0).WithMessage("Tax rate cannot be negative.");
+
+            RuleFor(x => x.StartDate)
+                .NotEmpty().WithMessage("Start date is required.");
+
+            When(x => x.TaxType == TaxType.Weekly.ToString() ||
+                      x.TaxType == TaxType.Monthly.ToString(), () =>
+            {
+                RuleFor(x => x.EndDate)
+                    .NotEmpty().WithMessage("End date is required for Weekly/Monthly tax types.")
+                    .GreaterThanOrEqualTo(x => x.StartDate).WithMessage("End date cannot be before start date.");
+            });
+
+            When(x => x.TaxType == TaxType.Yearly.ToString() ||
+                      x.TaxType == TaxType.Daily.ToString(), () =>
+            {
+                RuleFor(x => x.EndDate)
+                    .Empty().WithMessage("End date should not be provided for Yearly/Daily tax types.");
+            });
+        }
+    }
+}
+
+// MunicipalityTax.Application/Validators/AddTaxRuleCommandValidator.cs
+using FluentValidation;
+using MunicipalityTax.Application.Commands;
+using MunicipalityTax.Domain.Models; // Assuming TaxType enum is here
+
+namespace MunicipalityTax.Application.Validators
+{
+    public class AddTaxRuleCommandValidator : AbstractValidator<AddTaxRuleCommand>
+    {
+        public AddTaxRuleCommandValidator()
+        {
+            RuleFor(x => x.MunicipalityName)
+                .NotEmpty().WithMessage("Municipality name is required.")
+                .MaximumLength(100).WithMessage("Municipality name cannot exceed 100 characters.");
+
+            RuleFor(x => x.TaxType)
+                .NotEmpty().WithMessage("Tax type is required.")
+                // Use IsEnumName for string-based enum validation
+                .IsEnumName(typeof(TaxType), caseSensitive: false)
+                    .WithMessage("Invalid Tax type. Must be 'Daily', 'Weekly', 'Monthly', or 'Yearly'.");
+
+            RuleFor(x => x.TaxRate)
+                .GreaterThanOrEqualTo(0).WithMessage("Tax rate cannot be negative.");
+
+            RuleFor(x => x.StartDate)
+                .NotEmpty().WithMessage("Start date is required.");
+
+            // Conditional validation for EndDate based on TaxType
+            When(x => x.TaxType == TaxType.Weekly.ToString() ||
+                      x.TaxType == TaxType.Monthly.ToString(), () =>
+            {
+                RuleFor(x => x.EndDate)
+                    .NotEmpty().WithMessage("End date is required for Weekly/Monthly tax types.")
+                    .GreaterThanOrEqualTo(x => x.StartDate).WithMessage("End date cannot be before start date.");
+            });
+
+            When(x => x.TaxType == TaxType.Yearly.ToString() ||
+                      x.TaxType == TaxType.Daily.ToString(), () =>
+            {
+                RuleFor(x => x.EndDate)
+                    .Empty().WithMessage("End date should not be provided for Yearly/Daily tax types.");
+            });
+        }
+    }
+}
+
+dotnet add package FluentValidation.AspNetCore
+dotnet add package FluentValidation
+
+// MunicipalityTax.API/Program.cs
+
+using FluentValidation;
+using FluentValidation.AspNetCore; // Required for AddFluentValidationAutoValidation etc.
+using MunicipalityTax.Application.Validators; // Namespace where your validators are defined
+// ... other usings ...
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add services to the container.
+
+// Register FluentValidation services
+builder.Services.AddFluentValidationAutoValidation(); // Enables automatic validation
+builder.Services.AddFluentValidationClientsideAdapters(); // Optional: For client-side validation in MVC views (can skip if API only)
+// This line finds and registers all validators that inherit from AbstractValidator
+// within the assembly where AddTaxRuleCommandValidator resides.
+builder.Services.AddValidatorsFromAssemblyContaining<AddTaxRuleCommandValidator>();
+
+// ... other service registrations (e.g., builder.Services.AddScoped<ValidationFilter>(); if using ServiceFilter)
+
+builder.Services.AddControllers(options =>
+{
+    // IMPORTANT: Suppress the default ASP.NET Core model validation filter
+    // This prevents it from returning a default 400 response before our custom filter runs.
+    options.SuppressModelStateInvalidFilter = true;
+
+    // We'll add our custom filter globally here in Step 5.
+});
+
+// ... rest of builder and app configuration ...
+
+
+
+// MunicipalityTax.API/Filters/ValidationFilter.cs
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.Extensions.Logging;
+using System.Linq;
+
+namespace MunicipalityTax.API.Filters
+{
+    // This filter logs validation errors and returns a consistent 400 Bad Request response.
+    public class ValidationFilter : IActionFilter
+    {
+        private readonly ILogger<ValidationFilter> _logger;
+
+        public ValidationFilter(ILogger<ValidationFilter> logger)
+        {
+            _logger = logger;
+        }
+
+        public void OnActionExecuting(ActionExecutingContext context)
+        {
+            // Check if the model state is invalid
+            if (!context.ModelState.IsValid)
+            {
+                // Extract and log validation errors
+                var errors = context.ModelState.Values
+                    .SelectMany(v => v.Errors)
+                    .Select(e => e.ErrorMessage)
+                    .ToList();
+
+                _logger.LogWarning("Model validation failed for action '{ActionName}'. Errors: {Errors}",
+                    context.ActionDescriptor.DisplayName, string.Join("; ", errors));
+
+                // Construct the custom error response as an anonymous object
+                var errorResponse = new
+                {
+                    message = "One or more validation errors occurred.",
+                    code = "VALIDATION_ERROR", // A generic code for validation failures
+                    details = context.ModelState
+                        .Where(x => x.Value != null && x.Value.Errors.Any())
+                        .ToDictionary(
+                            // Key is the property name (e.g., "MunicipalityName")
+                            kvp => kvp.Key,
+                            // Value is an array of error messages for that property
+                            kvp => kvp.Value?.Errors.Select(e => e.ErrorMessage).ToArray()
+                        )
+                };
+
+                // Set the result to BadRequest and short-circuit the pipeline
+                context.Result = new BadRequestObjectResult(errorResponse);
+            }
+        }
+
+        public void OnActionExecuted(ActionExecutedContext context)
+        {
+            // This method is called after the action has executed.
+            // For validation, we typically don't need to do anything here.
+        }
+    }
+}
+
+// MunicipalityTax.API/Program.cs
+
+using FluentValidation;
+using FluentValidation.AspNetCore;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using MunicipalityTax.API.Filters; // For ValidationFilter
+using MunicipalityTax.Application.Services;
+using MunicipalityTax.Application.Validators; // For AddTaxRuleCommandValidator (used to locate assembly)
+using MunicipalityTax.Application.Mappers; // For MappingProfile (used to locate assembly for AutoMapper)
+using MunicipalityTax.Domain.Interfaces;
+using MunicipalityTax.Infrastructure.Persistence.Repositories;
+using AutoMapper; // Ensure AutoMapper namespace is present
+
+var builder = WebApplication.CreateBuilder(args);
+
+// --- Configure Services ---
+
+// Add controllers with custom API behavior options
+builder.Services.AddControllers(options =>
+{
+    // Suppress the default ASP.NET Core model validation filter.
+    // This allows our custom ValidationFilter to handle ModelState validation explicitly.
+    options.SuppressModelStateInvalidFilter = true;
+
+    // Register our custom ValidationFilter globally.
+    // It will intercept all incoming requests with bound models.
+    options.Filters.Add<ValidationFilter>();
+});
+
+// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+// Configure FluentValidation
+builder.Services.AddFluentValidationAutoValidation(); // Enables automatic validation using FluentValidation
+builder.Services.AddFluentValidationClientsideAdapters(); // Optional: For client-side validation adapters (useful if you had MVC views)
+
+// Register all validators from the assembly where AddTaxRuleCommandValidator is located.
+// This means all your AbstractValidator<T> implementations will be discovered and registered.
+builder.Services.AddValidatorsFromAssemblyContaining<AddTaxRuleCommandValidator>();
+
+// Register Application Services
+builder.Services.AddScoped<MunicipalityManagementService>();
+builder.Services.AddScoped<TaxCalculationService>();
+
+// Register Repositories
+builder.Services.AddScoped<ITaxRuleRepository, TaxRuleRepository>();
+
+// Register the ValidationFilter itself as a service.
+// This is necessary because it has dependencies (ILogger) that need to be injected.
+builder.Services.AddScoped<ValidationFilter>();
+
+// Configure AutoMapper
+// Scans the assembly containing MappingProfile for all AutoMapper profiles
+builder.Services.AddAutoMapper(typeof(MappingProfile).Assembly);
+
+// --- Configure the HTTP request pipeline ---
+var app = builder.Build();
+
+// Enable Swagger UI in Development environment
+if (app.Environment.IsDevelopment())
+{
+    app.UseDeveloperExceptionPage(); // Provides detailed error pages in development
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+else
+{
+    // Production error handling:
+    // This is a basic error handler. For production, you might have a more robust global exception handler middleware.
+    app.UseExceptionHandler("/error"); // Redirects to a generic error page/endpoint
+    app.UseHsts(); // Enforces HTTPS for security (HTTP Strict Transport Security)
+}
+
+app.UseHttpsRedirection(); // Redirects HTTP requests to HTTPS
+
+app.UseRouting(); // Enables endpoint routing
+
+app.UseAuthorization(); // Enables authorization middleware
+
+// Maps controller actions to incoming requests
+app.MapControllers();
+
+app.Run();
