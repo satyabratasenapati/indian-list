@@ -130,56 +130,75 @@ using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.Logging;
 using System.Linq;
 
+// MunicipalityTax.API/Filters/ValidationFilter.cs
+using FluentValidation;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.Extensions.Logging;
+using System.Linq;
+using System.Threading.Tasks;
+
 namespace MunicipalityTax.API.Filters
 {
-    // This filter logs validation errors and returns a consistent 400 Bad Request response.
-    public class ValidationFilter : IActionFilter
+    public class ValidationFilter : IAsyncActionFilter
     {
         private readonly ILogger<ValidationFilter> _logger;
+        private readonly IServiceProvider _serviceProvider; // To resolve validators
 
-        public ValidationFilter(ILogger<ValidationFilter> logger)
+        public ValidationFilter(ILogger<ValidationFilter> logger, IServiceProvider serviceProvider)
         {
             _logger = logger;
+            _serviceProvider = serviceProvider;
         }
 
-        public void OnActionExecuting(ActionExecutingContext context)
+        public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
         {
-            // Check if the model state is invalid
-            if (!context.ModelState.IsValid)
+            // Check if there's any model to validate
+            if (context.ActionArguments.Any(kv => kv.Value != null))
             {
-                // Extract and log validation errors
-                var errors = context.ModelState.Values
-                    .SelectMany(v => v.Errors)
-                    .Select(e => e.ErrorMessage)
-                    .ToList();
-
-                _logger.LogWarning("Model validation failed for action '{ActionName}'. Errors: {Errors}",
-                    context.ActionDescriptor.DisplayName, string.Join("; ", errors));
-
-                // Construct the custom error response as an anonymous object
-                var errorResponse = new
+                foreach (var arg in context.ActionArguments.Values)
                 {
-                    message = "One or more validation errors occurred.",
-                    code = "VALIDATION_ERROR", // A generic code for validation failures
-                    details = context.ModelState
-                        .Where(x => x.Value != null && x.Value.Errors.Any())
-                        .ToDictionary(
-                            // Key is the property name (e.g., "MunicipalityName")
-                            kvp => kvp.Key,
-                            // Value is an array of error messages for that property
-                            kvp => kvp.Value?.Errors.Select(e => e.ErrorMessage).ToArray()
-                        )
-                };
+                    if (arg == null) continue; // Skip null arguments
 
-                // Set the result to BadRequest and short-circuit the pipeline
-                context.Result = new BadRequestObjectResult(errorResponse);
+                    // Dynamically get the validator type for the argument's type
+                    var validatorType = typeof(IValidator<>).MakeGenericType(arg.GetType());
+
+                    // Try to resolve the validator from the service provider
+                    var validator = _serviceProvider.GetService(validatorType) as IValidator;
+
+                    if (validator != null)
+                    {
+                        // Create a validation context for the model
+                        var validationContext = new ValidationContext<object>(arg);
+
+                        // Perform validation
+                        var validationResult = await validator.ValidateAsync(validationContext, context.HttpContext.RequestAborted);
+
+                        if (!validationResult.IsValid)
+                        {
+                            var errors = validationResult.Errors
+                                .GroupBy(x => x.PropertyName)
+                                .ToDictionary(
+                                    g => g.Key,
+                                    g => g.Select(x => x.ErrorMessage).ToArray()
+                                );
+
+                            _logger.LogWarning("Validation failed for model {ModelType}: {@Errors}", arg.GetType().Name, errors);
+
+                            context.Result = new BadRequestObjectResult(new ValidationProblemDetails(errors)
+                            {
+                                Title = "One or more validation errors occurred.",
+                                Status = StatusCodes.Status400BadRequest,
+                                Type = "https://tools.ietf.org/html/rfc9110#section-15.5.1"
+                            });
+                            return; // Stop execution if validation fails
+                        }
+                    }
+                }
             }
-        }
 
-        public void OnActionExecuted(ActionExecutedContext context)
-        {
-            // This method is called after the action has executed.
-            // For validation, we typically don't need to do anything here.
+            // Proceed to the next filter/action if validation passes or no validators are found
+            await next();
         }
     }
 }
