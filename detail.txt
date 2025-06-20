@@ -113,20 +113,135 @@ Update-Database -Project MunicipalityTax.Infrastructure -StartupProject Municipa
 
 
 
-// --- NEW: OVERLAP VALIDATION FOR UPDATE ---
-            bool isOverlapping = await _repository.HasOverlappingTaxRuleAsync(
-                existingRule.MunicipalityId, // Use the (potentially updated) municipality ID
-                existingRule.Type,
-                existingRule.StartDate,
-                existingRule.EndDate,
-                existingRule.Id, // Exclude the rule being updated
-                existingRule.DayOfMonth,
-                existingRule.DayOfWeek,
-                existingRule.DayOfYear
-            );
+public class BaseController : Controller
+{
+    public IMicroServiceLogger _logger;
 
-            if (isOverlapping)
+    public BaseController(IMicroServiceLogger Logger)
+    {
+        _logger = Logger;
+    }
+
+    protected IActionResult GetHttpResponse(Func<IActionResult> codeToExecute)
+    {
+        IActionResult result = null;
+        try
+        {
+            result = codeToExecute.Invoke();
+        }
+        catch (MicroServiceException sbe)
+        {
+            // string errorMessage = GetErrorMessage(sbe);
+            string errorMessage = RESError.ResourceManager.GetString(sbe.ErrorCode);
+            _logger.Warn(errorMessage);
+            return BadRequest(new RequestResult
             {
-                _logger.LogWarning("Attempted to update tax rule {TaxRuleId} with overlapping dates/days for Municipality: {MunicipalityName}, Type: {TaxType}", id, existingRule.Municipality?.Name, existingRule.Type);
-                throw new InvalidOperationException($"Updating tax rule with ID '{id}' would create an overlap for '{existingRule.Municipality?.Name}' of type '{existingRule.Type}' for the specified period/day.");
+                Success = false,
+                Error = new ErrorDetail() { Message = errorMessage }
+            });
+        }
+        catch(WorkflowException wfExptn)
+        {
+            _logger.Warn(wfExptn.Message);
+            return BadRequest(new RequestResult
+            {
+                Success = false,
+                Error = new ErrorDetail() { Message = wfExptn.Message }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.Error(ex.StackTrace);
+            return BadRequest(new RequestResult
+            {
+                Success = false,
+                Error = new ErrorDetail() { Message = ex?.Message ?? "There was a problem handling your request.Please contact support."}
+            });
+        }
+        string APIName = this.ControllerContext.RouteData.Values["controller"].ToString() + "/" + this.ControllerContext.RouteData.Values["action"].ToString();
+        _logger.Info(APIName);
+        return result;
+    }
+
+    #region Error code reading
+    private string GetErrorMessage(MicroServiceException _microServiceException)
+    {
+        if (_microServiceException.SubstitutionParams == null)
+        {
+            if (!String.IsNullOrEmpty(_microServiceException.ErrorMessage))
+            {
+                return _microServiceException.ErrorMessage;
             }
+            else
+            {
+                return GetMessageForCode(_microServiceException.ErrorCode);
+            }
+        }
+        else
+        {
+            if (!String.IsNullOrEmpty(_microServiceException.ErrorMessage))
+            {
+                return string.Format(_microServiceException.ErrorMessage, _microServiceException.SubstitutionParams);
+            }
+            else
+            {
+                string errorMessage = GetMessageForCode(_microServiceException.ErrorCode);
+                //Now replace the parameters
+                if (_microServiceException.SubstitutionParams.Length > 1)
+                {
+                    return string.Format(_microServiceException.ErrorMessage, _microServiceException.SubstitutionParams);
+                }
+                else
+                {
+                    return string.Format(errorMessage, _microServiceException.SubstitutionParams);
+                }
+            }
+        }
+
+    }
+
+    private string GetMessageForCode(string errorCode)
+    {
+        string value = String.Empty;
+        try
+        {
+            value = RESError.ResourceManager.GetString(errorCode);
+        }
+        catch (MicroServiceException)
+        {
+            value = GetDefaultErrorMessage();
+        }
+        return value;
+    }
+
+    private static string GetDefaultErrorMessage()
+    {
+        return RESError.ResourceManager.GetString(Constant.ERROR_GENERIC);
+    } 
+    #endregion
+}
+
+return GetHttpResponse(() =>
+{
+    string ClientApplicationURL = string.Empty, paymentFailedReturnUrl = string.Empty;
+    ClientApplicationURL = _iconfiguration.GetSection("ClientApplicationURL").Value;
+    paymentFailedReturnUrl = _paymentService.GetClientPaymentFailureUrl();
+    if (Request != null && !string.IsNullOrEmpty(i))
+    {
+
+        EasyPayResponseParam easyPayResponse = _paymentService.DecryptPaymentResponse(i);
+
+        _paymentService.DoPostPaymentActivity(ref easyPayResponse);
+
+
+        string returnUrl = _paymentService.GetClientReturnUrl(easyPayResponse);
+
+
+        //Send to the client in query param
+        return RedirectPermanent(ClientApplicationURL + returnUrl);
+    }
+    else
+    {
+        return BadRequestRedirect(ClientApplicationURL, paymentFailedReturnUrl);
+    }
+});
