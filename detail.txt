@@ -113,142 +113,139 @@ Update-Database -Project MunicipalityTax.Infrastructure -StartupProject Municipa
 
 
 
-public abstract class BaseController<TController> : ControllerBase where TController : ControllerBase
+// MunicipalityTax.API/Controllers/BaseController.cs
+using Microsoft.AspNetCore.Mvc;
+using MunicipalityTax.API.Models; // For RequestResult, ErrorDetail
+// using MunicipalityTax.Domain.Exceptions; // MicroServiceException is removed, so this might not be needed depending on other custom exceptions
+using System;
+using System.Resources; // Potentially remove if RESError completely goes away
+using System.Reflection; // Potentially remove if RESError completely goes away
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
+
+// Removed RESErrorNamespace if it's no longer used for any error code lookup
+// If you still need a generic error message resource, you can keep a simplified RESError.
+// For now, let's assume direct strings are used for default messages.
+
+namespace MunicipalityTax.API.Controllers
+{
+    public abstract class BaseController<TController> : ControllerBase where TController : ControllerBase
     {
-        // DIRECTLY USE ILogger<TController>
         protected readonly ILogger<TController> _logger;
 
-        // Constructor now injects ILogger<TController>
         protected BaseController(ILogger<TController> logger)
         {
             _logger = logger;
         }
 
-        // --- Core Method to Wrap Controller Action Logic (no changes needed here beyond logger type) ---
-        protected async Task<IActionResult> GetHttpResponseAsync<TResult>(Func<Task<TResult>> codeToExecute)
+        // --- Overload 1: For actions that return data on success ---
+        protected async Task<IActionResult> GetHttpResponseAsync<TResult>(
+            Func<Task<TResult>> codeToExecute,
+            int successStatusCode = StatusCodes.Status200OK,
+            string? successMessage = null) // Optional success message
         {
             try
             {
                 TResult resultData = await codeToExecute.Invoke();
-                return Ok(new RequestResult
+
+                return StatusCode(successStatusCode, new RequestResult
                 {
                     Success = true,
-                    Data = resultData
+                    Data = resultData,
+                    Message = successMessage // Use the new Message property
                 });
             }
-            catch (MicroServiceException sbe)
-            {
-                string errorMessage = GetErrorMessage(sbe);
-                _logger.LogWarning(errorMessage); // Use LogWarning for ILogger
-                return BadRequest(new RequestResult
-                {
-                    Success = false,
-                    Error = new ErrorDetail() { Message = errorMessage, Code = sbe.ErrorCode }
-                });
-            }
-            catch (WorkflowException wfExptn)
-            {
-                _logger.LogWarning(wfExptn.Message); // Use LogWarning for ILogger
-                return BadRequest(new RequestResult
-                {
-                    Success = false,
-                    Error = new ErrorDetail() { Message = wfExptn.Message, Code = "WORKFLOW_ERROR" }
-                });
-            }
+            // Removed catch (MicroServiceException sbe)
             catch (ArgumentException argEx)
             {
-                _logger.LogWarning(argEx.Message); // Use LogWarning for ILogger
+                _logger.LogWarning("Bad Request (ArgumentException): {Message}", argEx.Message);
                 return BadRequest(new RequestResult
                 {
                     Success = false,
-                    Error = new ErrorDetail() { Message = argEx.Message, Code = "INVALID_ARGUMENT" }
+                    Message = "Invalid request parameter.", // General message for user
+                    Error = new ErrorDetail() { Message = argEx.Message, Code = "INVALID_ARGUMENT" } // Detailed message for developer/logs
                 });
             }
             catch (InvalidOperationException invOpEx)
             {
-                _logger.LogWarning(invOpEx.Message); // Use LogWarning for ILogger
+                _logger.LogWarning("Bad Request (InvalidOperationException): {Message}", invOpEx.Message);
                 return BadRequest(new RequestResult
                 {
                     Success = false,
-                    Error = new ErrorDetail() { Message = invOpEx.Message, Code = "BUSINESS_RULE_VIOLATION" }
+                    Message = "A business operation could not be completed.", // General message for user
+                    Error = new ErrorDetail() { Message = invOpEx.Message, Code = "BUSINESS_RULE_VIOLATION" } // Detailed message for developer/logs
                 });
             }
             catch (Exception ex)
             {
                 string apiName = GetCurrentApiName();
-                // Use LogError for ILogger, passing the exception object
-                _logger.LogError(ex, "An unhandled exception occurred in API: {APIName} - {Message}", apiName, ex.Message);
+                _logger.LogError(ex, "An unhandled exception occurred in API: {APIName}", apiName); // Log the full exception object
                 return StatusCode(
                     StatusCodes.Status500InternalServerError,
                     new RequestResult
                     {
                         Success = false,
-                        Error = new ErrorDetail() { Message = "An unexpected error occurred. Please contact support.", Code = "INTERNAL_SERVER_ERROR" }
+                        Message = "An unexpected error occurred. Please contact support.", // General message for user
+                        Error = new ErrorDetail() { Message = "Internal Server Error", Code = "INTERNAL_SERVER_ERROR" } // Simple error for client
                     }
                 );
             }
         }
 
-        protected async Task<IActionResult> GetHttpResponseAsync(Func<Task> codeToExecute, int successStatusCode = StatusCodes.Status200OK)
+        // --- Overload 2: For actions that don't return specific data (e.g., just confirmation) ---
+        protected async Task<IActionResult> GetHttpResponseAsync(
+            Func<Task> codeToExecute,
+            int successStatusCode = StatusCodes.Status200OK,
+            string? successMessage = null)
         {
             try
             {
                 await codeToExecute.Invoke();
-                return StatusCode(successStatusCode, new RequestResult { Success = true });
-            }
-            catch (MicroServiceException sbe)
-            {
-                string errorMessage = GetErrorMessage(sbe);
-                _logger.LogWarning(errorMessage);
-                return BadRequest(new RequestResult
+
+                return StatusCode(successStatusCode, new RequestResult
                 {
-                    Success = false,
-                    Error = new ErrorDetail() { Message = errorMessage, Code = sbe.ErrorCode }
+                    Success = true,
+                    Message = successMessage // Use the new Message property
                 });
             }
-            catch (WorkflowException wfExptn)
+            // Removed catch (MicroServiceException sbe)
+            catch (ArgumentException argEx)
             {
-                _logger.LogWarning(wfExptn.Message);
+                _logger.LogWarning("Bad Request (ArgumentException): {Message}", argEx.Message);
                 return BadRequest(new RequestResult
                 {
                     Success = false,
-                    Error = new ErrorDetail() { Message = wfExptn.Message, Code = "WORKFLOW_ERROR" }
-                });
-            }
-             catch (ArgumentException argEx)
-            {
-                _logger.LogWarning(argEx.Message);
-                return BadRequest(new RequestResult
-                {
-                    Success = false,
+                    Message = "Invalid request parameter.",
                     Error = new ErrorDetail() { Message = argEx.Message, Code = "INVALID_ARGUMENT" }
                 });
             }
             catch (InvalidOperationException invOpEx)
             {
-                _logger.LogWarning(invOpEx.Message);
+                _logger.LogWarning("Bad Request (InvalidOperationException): {Message}", invOpEx.Message);
                 return BadRequest(new RequestResult
                 {
                     Success = false,
+                    Message = "A business operation could not be completed.",
                     Error = new ErrorDetail() { Message = invOpEx.Message, Code = "BUSINESS_RULE_VIOLATION" }
                 });
             }
             catch (Exception ex)
             {
                 string apiName = GetCurrentApiName();
-                _logger.LogError(ex, "An unhandled exception occurred in API (no return value): {APIName} - {Message}", apiName, ex.Message);
+                _logger.LogError(ex, "An unhandled exception occurred in API (no return value): {APIName}", apiName);
                 return StatusCode(
                     StatusCodes.Status500InternalServerError,
                     new RequestResult
                     {
                         Success = false,
-                        Error = new ErrorDetail() { Message = "An unexpected error occurred. Please contact support.", Code = "INTERNAL_SERVER_ERROR" }
+                        Message = "An unexpected error occurred. Please contact support.",
+                        Error = new ErrorDetail() { Message = "Internal Server Error", Code = "INTERNAL_SERVER_ERROR" }
                     }
                 );
             }
         }
 
-        // Helper to get API name for logging
+        // Helper to get API name for logging (unchanged)
         private string GetCurrentApiName()
         {
             var controllerName = ControllerContext.RouteData.Values["controller"]?.ToString();
@@ -256,42 +253,7 @@ public abstract class BaseController<TController> : ControllerBase where TContro
             return $"{controllerName}/{actionName}";
         }
 
-        #region Error code reading (adapted)
-        protected string GetErrorMessage(MicroServiceException _microServiceException)
-        {
-            if (_microServiceException.SubstitutionParams == null || _microServiceException.SubstitutionParams.Length == 0)
-            {
-                return !String.IsNullOrEmpty(_microServiceException.ErrorMessage)
-                       ? _microServiceException.ErrorMessage
-                       : GetMessageForCode(_microServiceException.ErrorCode);
-            }
-            else
-            {
-                string formatString = !String.IsNullOrEmpty(_microServiceException.ErrorMessage)
-                                      ? _microServiceException.ErrorMessage
-                                      : GetMessageForCode(_microServiceException.ErrorCode);
-                return string.Format(formatString, _microServiceException.SubstitutionParams);
-            }
-        }
-
-        protected string GetMessageForCode(string errorCode)
-        {
-            try
-            {
-                return RESError.ResourceManager.GetString(errorCode) ?? GetDefaultErrorMessage();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to retrieve error message for code: {ErrorCode}", errorCode); // Use LogError
-                return GetDefaultErrorMessage();
-            }
-        }
-
-        protected static string GetDefaultErrorMessage()
-        {
-            return RESError.ResourceManager.GetString(RESError.ERROR_GENERIC) ?? "An unexpected error occurred. Please contact support.";
-        }
-        #endregion
+        // REMOVED: #region Error code reading and its methods (GetErrorMessage, GetMessageForCode, GetDefaultErrorMessage)
     }
 }
 public MunicipalityController(
@@ -301,6 +263,53 @@ public MunicipalityController(
         {
             _managementService = managementService;
         }
+
+
+// MunicipalityTax.API/Controllers/MunicipalityController.cs (Example)
+// ...
+        public async Task<IActionResult> AddTaxRule([FromBody] AddTaxRuleCommand command)
+        {
+            if (!ModelState.IsValid)
+            {
+                _logger.LogWarning("Invalid AddTaxRuleCommand received. Validation errors: {ValidationErrors}", ModelState); // Log ModelState
+                return BadRequest(new RequestResult { Success = false, Message = "Invalid input data." }); // Use Message property
+            }
+
+            return await GetHttpResponseAsync(
+                async () =>
+                {
+                    await _managementService.AddNewTaxRuleAsync(command);
+                },
+                StatusCodes.Status201Created,
+                "Tax rule added successfully."
+            );
+        }
+// ...
+
+
+[HttpGet("tax")]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> GetTax([FromQuery] string municipalityName, [FromQuery] DateTime date)
+        {
+            if (string.IsNullOrWhiteSpace(municipalityName))
+            {
+                _logger.LogWarning("GetTax: Municipality name is required.");
+                return BadRequest(new RequestResult { Success = false, Error = new ErrorDetail { Message = "Municipality name is required." } });
+            }
+
+            return await GetHttpResponseAsync<object>(
+                async () => // Function to execute, returning an object
+                {
+                    decimal totalTax = await _taxCalculationService.GetTaxAsync(municipalityName, date);
+                    return new { municipalityName, date = date.ToShortDateString(), totalTax };
+                },
+                StatusCodes.Status200OK, // Explicitly state 200 OK (could omit for default)
+                "Tax calculation successful." // Provide a success message
+            );
+        }
+
+old code
 return GetHttpResponse(() =>
 {
     string ClientApplicationURL = string.Empty, paymentFailedReturnUrl = string.Empty;
