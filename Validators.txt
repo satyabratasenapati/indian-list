@@ -1,7 +1,9 @@
 // MunicipalityTax.Application/Validators/UpdateTaxRuleCommandValidator.cs
+
 using FluentValidation;
 using MunicipalityTax.Application.Commands;
-using MunicipalityTax.Domain.Models; // Assuming TaxType enum is here
+using MunicipalityTax.Domain.Models; // Ensure this points to where your TaxType enum is defined
+using System; // Required for DayOfWeek and DateTime
 
 namespace MunicipalityTax.Application.Validators
 {
@@ -9,43 +11,89 @@ namespace MunicipalityTax.Application.Validators
     {
         public UpdateTaxRuleCommandValidator()
         {
+            // RuleId: Must be a valid identifier
+            RuleFor(x => x.RuleId)
+                .GreaterThan(0).WithMessage("Rule ID must be a positive integer.");
+
+            // MunicipalityName: Required and has a maximum length
             RuleFor(x => x.MunicipalityName)
                 .NotEmpty().WithMessage("Municipality name is required.")
                 .MaximumLength(100).WithMessage("Municipality name cannot exceed 100 characters.");
 
-            RuleFor(x => x.TaxType)
-                .NotEmpty().WithMessage("Tax type is required.")
-                .IsEnumName(typeof(TaxType), caseSensitive: false)
-                    .WithMessage("Invalid Tax type. Must be 'Daily', 'Weekly', 'Monthly', or 'Yearly'.");
+            // Type (TaxType enum): Must be a valid enum member
+            RuleFor(x => x.Type)
+                .IsInEnum().WithMessage("Invalid Tax type. Must be 'Daily', 'Weekly', 'Monthly', or 'Yearly'.")
+                // If 0 is NOT a valid tax type and your enum starts from 0 (e.g., Daily = 0)
+                // .NotEqual(TaxType.Daily).WithMessage("Tax type is required and cannot be the default value.");
+                ;
 
-            RuleFor(x => x.TaxRate)
-                .GreaterThanOrEqualTo(0).WithMessage("Tax rate cannot be negative.");
+            // TaxValue: Must be non-negative
+            RuleFor(x => x.TaxValue)
+                .GreaterThanOrEqualTo(0).WithMessage("Tax value cannot be negative.");
 
+            // StartDate: Required
             RuleFor(x => x.StartDate)
                 .NotEmpty().WithMessage("Start date is required.");
 
-            When(x => x.TaxType == TaxType.Weekly.ToString() ||
-                      x.TaxType == TaxType.Monthly.ToString(), () =>
+            // Conditional rules for EndDate based on TaxType
+            When(x => x.Type == TaxType.Weekly || x.Type == TaxType.Monthly, () =>
             {
                 RuleFor(x => x.EndDate)
-                    .NotEmpty().WithMessage("End date is required for Weekly/Monthly tax types.")
+                    .NotEmpty().WithMessage("End date is required for Weekly or Monthly tax types.")
                     .GreaterThanOrEqualTo(x => x.StartDate).WithMessage("End date cannot be before start date.");
             });
 
-            When(x => x.TaxType == TaxType.Yearly.ToString() ||
-                      x.TaxType == TaxType.Daily.ToString(), () =>
+            When(x => x.Type == TaxType.Daily || x.Type == TaxType.Yearly, () =>
             {
                 RuleFor(x => x.EndDate)
-                    .Empty().WithMessage("End date should not be provided for Yearly/Daily tax types.");
+                    .Empty().WithMessage("End date should not be provided for Daily or Yearly tax types.");
+            });
+
+            // Conditional rules for DayOfMonth based on TaxType
+            When(x => x.Type == TaxType.Monthly, () =>
+            {
+                RuleFor(x => x.DayOfMonth)
+                    .NotNull().WithMessage("Day of month is required for Monthly tax type.")
+                    .InclusiveBetween(1, 31).WithMessage("Day of month must be between 1 and 31.");
+            }).Otherwise(() =>
+            {
+                RuleFor(x => x.DayOfMonth)
+                    .Null().WithMessage("Day of month should not be provided for this tax type.");
+            });
+
+            // Conditional rules for DayOfWeek based on TaxType
+            When(x => x.Type == TaxType.Weekly, () =>
+            {
+                RuleFor(x => x.DayOfWeek)
+                    .NotNull().WithMessage("Day of week is required for Weekly tax type.")
+                    .IsInEnum().WithMessage("Invalid Day of Week.");
+            }).Otherwise(() =>
+            {
+                RuleFor(x => x.DayOfWeek)
+                    .Null().WithMessage("Day of week should not be provided for this tax type.");
+            });
+
+            // Conditional rules for DayOfYear based on TaxType
+            When(x => x.Type == TaxType.Yearly, () =>
+            {
+                RuleFor(x => x.DayOfYear)
+                    .NotNull().WithMessage("Day of year is required for Yearly tax type.")
+                    .InclusiveBetween(1, 366).WithMessage("Day of year must be between 1 and 366."); // 366 for leap years
+            }).Otherwise(() =>
+            {
+                RuleFor(x => x.DayOfYear)
+                    .Null().WithMessage("Day of year should not be provided for this tax type.");
             });
         }
     }
 }
 
 // MunicipalityTax.Application/Validators/AddTaxRuleCommandValidator.cs
+
 using FluentValidation;
 using MunicipalityTax.Application.Commands;
-using MunicipalityTax.Domain.Models; // Assuming TaxType enum is here
+using MunicipalityTax.Domain.Models; // Ensure this points to where your TaxType enum is defined
+using System; // Required for DateTime and DayOfWeek
 
 namespace MunicipalityTax.Application.Validators
 {
@@ -53,241 +101,77 @@ namespace MunicipalityTax.Application.Validators
     {
         public AddTaxRuleCommandValidator()
         {
+            // MunicipalityName: Required and has a maximum length
             RuleFor(x => x.MunicipalityName)
                 .NotEmpty().WithMessage("Municipality name is required.")
                 .MaximumLength(100).WithMessage("Municipality name cannot exceed 100 characters.");
 
-            RuleFor(x => x.TaxType)
-                .NotEmpty().WithMessage("Tax type is required.")
-                // Use IsEnumName for string-based enum validation
-                .IsEnumName(typeof(TaxType), caseSensitive: false)
-                    .WithMessage("Invalid Tax type. Must be 'Daily', 'Weekly', 'Monthly', or 'Yearly'.");
+            // Type (TaxType enum): Must be a valid enum member
+            RuleFor(x => x.Type)
+                .IsInEnum().WithMessage("Invalid Tax type. Must be 'Daily', 'Weekly', 'Monthly', or 'Yearly'.")
+                // Optional: If 0 is NOT a valid tax type and your enum starts from 0 (e.g., Daily = 0)
+                // .NotEqual(TaxType.Daily).WithMessage("Tax type is required and cannot be the default value.");
+                ;
 
-            RuleFor(x => x.TaxRate)
-                .GreaterThanOrEqualTo(0).WithMessage("Tax rate cannot be negative.");
+            // TaxValue: Must be non-negative
+            RuleFor(x => x.TaxValue)
+                .GreaterThanOrEqualTo(0).WithMessage("Tax value cannot be negative.");
 
+            // StartDate: Required
             RuleFor(x => x.StartDate)
                 .NotEmpty().WithMessage("Start date is required.");
 
-            // Conditional validation for EndDate based on TaxType
-            When(x => x.TaxType == TaxType.Weekly.ToString() ||
-                      x.TaxType == TaxType.Monthly.ToString(), () =>
+            // Conditional rules for EndDate based on TaxType
+            // EndDate is required for Weekly/Monthly.
+            When(x => x.Type == TaxType.Weekly || x.Type == TaxType.Monthly, () =>
             {
                 RuleFor(x => x.EndDate)
-                    .NotEmpty().WithMessage("End date is required for Weekly/Monthly tax types.")
+                    .NotEmpty().WithMessage("End date is required for Weekly or Monthly tax types.")
                     .GreaterThanOrEqualTo(x => x.StartDate).WithMessage("End date cannot be before start date.");
             });
 
-            When(x => x.TaxType == TaxType.Yearly.ToString() ||
-                      x.TaxType == TaxType.Daily.ToString(), () =>
+            // EndDate should be empty/null for Daily/Yearly.
+            When(x => x.Type == TaxType.Daily || x.Type == TaxType.Yearly, () =>
             {
                 RuleFor(x => x.EndDate)
-                    .Empty().WithMessage("End date should not be provided for Yearly/Daily tax types.");
+                    .Empty().WithMessage("End date should not be provided for Daily or Yearly tax types.");
+            });
+
+            // Conditional rules for DayOfMonth: Required only for Monthly taxes.
+            When(x => x.Type == TaxType.Monthly, () =>
+            {
+                RuleFor(x => x.DayOfMonth)
+                    .NotNull().WithMessage("Day of month is required for Monthly tax type.")
+                    .InclusiveBetween(1, 31).WithMessage("Day of month must be between 1 and 31.");
+            }).Otherwise(() => // If not Monthly, DayOfMonth must be null
+            {
+                RuleFor(x => x.DayOfMonth)
+                    .Null().WithMessage("Day of month should not be provided for this tax type.");
+            });
+
+            // Conditional rules for DayOfWeek: Required only for Weekly taxes.
+            When(x => x.Type == TaxType.Weekly, () =>
+            {
+                RuleFor(x => x.DayOfWeek)
+                    .NotNull().WithMessage("Day of week is required for Weekly tax type.")
+                    .IsInEnum().WithMessage("Invalid Day of Week.");
+            }).Otherwise(() => // If not Weekly, DayOfWeek must be null
+            {
+                RuleFor(x => x.DayOfWeek)
+                    .Null().WithMessage("Day of week should not be provided for this tax type.");
+            });
+
+            // Conditional rules for DayOfYear: Required only for Daily taxes (as per your command's comment).
+            When(x => x.Type == TaxType.Daily, () =>
+            {
+                RuleFor(x => x.DayOfYear)
+                    .NotNull().WithMessage("Day of year is required for Daily tax type.")
+                    .InclusiveBetween(1, 366).WithMessage("Day of year must be between 1 and 366."); // 366 for leap years
+            }).Otherwise(() => // If not Daily, DayOfYear must be null
+            {
+                RuleFor(x => x.DayOfYear)
+                    .Null().WithMessage("Day of year should not be provided for this tax type.");
             });
         }
     }
 }
-
-dotnet add package FluentValidation.AspNetCore
-dotnet add package FluentValidation
-
-// MunicipalityTax.API/Program.cs
-
-using FluentValidation;
-using FluentValidation.AspNetCore; // Required for AddFluentValidationAutoValidation etc.
-using MunicipalityTax.Application.Validators; // Namespace where your validators are defined
-// ... other usings ...
-
-var builder = WebApplication.CreateBuilder(args);
-
-// Add services to the container.
-
-// Register FluentValidation services
-builder.Services.AddFluentValidationAutoValidation(); // Enables automatic validation
-builder.Services.AddFluentValidationClientsideAdapters(); // Optional: For client-side validation in MVC views (can skip if API only)
-// This line finds and registers all validators that inherit from AbstractValidator
-// within the assembly where AddTaxRuleCommandValidator resides.
-builder.Services.AddValidatorsFromAssemblyContaining<AddTaxRuleCommandValidator>();
-
-// ... other service registrations (e.g., builder.Services.AddScoped<ValidationFilter>(); if using ServiceFilter)
-
-builder.Services.AddControllers(options =>
-{
-    // IMPORTANT: Suppress the default ASP.NET Core model validation filter
-    // This prevents it from returning a default 400 response before our custom filter runs.
-    options.SuppressModelStateInvalidFilter = true;
-
-    // We'll add our custom filter globally here in Step 5.
-});
-
-// ... rest of builder and app configuration ...
-
-
-
-// MunicipalityTax.API/Filters/ValidationFilter.cs
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Filters;
-using Microsoft.Extensions.Logging;
-using System.Linq;
-
-// MunicipalityTax.API/Filters/ValidationFilter.cs
-using FluentValidation;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Filters;
-using Microsoft.Extensions.Logging;
-using System.Linq;
-using System.Threading.Tasks;
-
-namespace MunicipalityTax.API.Filters
-{
-    public class ValidationFilter : IAsyncActionFilter
-    {
-        private readonly ILogger<ValidationFilter> _logger;
-        private readonly IServiceProvider _serviceProvider; // To resolve validators
-
-        public ValidationFilter(ILogger<ValidationFilter> logger, IServiceProvider serviceProvider)
-        {
-            _logger = logger;
-            _serviceProvider = serviceProvider;
-        }
-
-        public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
-        {
-            // Check if there's any model to validate
-            if (context.ActionArguments.Any(kv => kv.Value != null))
-            {
-                foreach (var arg in context.ActionArguments.Values)
-                {
-                    if (arg == null) continue; // Skip null arguments
-
-                    // Dynamically get the validator type for the argument's type
-                    var validatorType = typeof(IValidator<>).MakeGenericType(arg.GetType());
-
-                    // Try to resolve the validator from the service provider
-                    var validator = _serviceProvider.GetService(validatorType) as IValidator;
-
-                    if (validator != null)
-                    {
-                        // Create a validation context for the model
-                        var validationContext = new ValidationContext<object>(arg);
-
-                        // Perform validation
-                        var validationResult = await validator.ValidateAsync(validationContext, context.HttpContext.RequestAborted);
-
-                        if (!validationResult.IsValid)
-                        {
-                            var errors = validationResult.Errors
-                                .GroupBy(x => x.PropertyName)
-                                .ToDictionary(
-                                    g => g.Key,
-                                    g => g.Select(x => x.ErrorMessage).ToArray()
-                                );
-
-                            _logger.LogWarning("Validation failed for model {ModelType}: {@Errors}", arg.GetType().Name, errors);
-
-                            context.Result = new BadRequestObjectResult(new ValidationProblemDetails(errors)
-                            {
-                                Title = "One or more validation errors occurred.",
-                                Status = StatusCodes.Status400BadRequest,
-                                Type = "https://tools.ietf.org/html/rfc9110#section-15.5.1"
-                            });
-                            return; // Stop execution if validation fails
-                        }
-                    }
-                }
-            }
-
-            // Proceed to the next filter/action if validation passes or no validators are found
-            await next();
-        }
-    }
-}
-
-// MunicipalityTax.API/Program.cs
-
-using FluentValidation;
-using FluentValidation.AspNetCore;
-using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using MunicipalityTax.API.Filters; // For ValidationFilter
-using MunicipalityTax.Application.Services;
-using MunicipalityTax.Application.Validators; // For AddTaxRuleCommandValidator (used to locate assembly)
-using MunicipalityTax.Application.Mappers; // For MappingProfile (used to locate assembly for AutoMapper)
-using MunicipalityTax.Domain.Interfaces;
-using MunicipalityTax.Infrastructure.Persistence.Repositories;
-using AutoMapper; // Ensure AutoMapper namespace is present
-
-var builder = WebApplication.CreateBuilder(args);
-
-// --- Configure Services ---
-
-// Add controllers with custom API behavior options
-builder.Services.AddControllers(options =>
-{
-    // Suppress the default ASP.NET Core model validation filter.
-    // This allows our custom ValidationFilter to handle ModelState validation explicitly.
-    options.SuppressModelStateInvalidFilter = true;
-
-    // Register our custom ValidationFilter globally.
-    // It will intercept all incoming requests with bound models.
-    options.Filters.Add<ValidationFilter>();
-});
-
-// Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-
-// Configure FluentValidation
-builder.Services.AddFluentValidationAutoValidation(); // Enables automatic validation using FluentValidation
-builder.Services.AddFluentValidationClientsideAdapters(); // Optional: For client-side validation adapters (useful if you had MVC views)
-
-// Register all validators from the assembly where AddTaxRuleCommandValidator is located.
-// This means all your AbstractValidator<T> implementations will be discovered and registered.
-builder.Services.AddValidatorsFromAssemblyContaining<AddTaxRuleCommandValidator>();
-
-// Register Application Services
-builder.Services.AddScoped<MunicipalityManagementService>();
-builder.Services.AddScoped<TaxCalculationService>();
-
-// Register Repositories
-builder.Services.AddScoped<ITaxRuleRepository, TaxRuleRepository>();
-
-// Register the ValidationFilter itself as a service.
-// This is necessary because it has dependencies (ILogger) that need to be injected.
-builder.Services.AddScoped<ValidationFilter>();
-
-// Configure AutoMapper
-// Scans the assembly containing MappingProfile for all AutoMapper profiles
-builder.Services.AddAutoMapper(typeof(MappingProfile).Assembly);
-
-// --- Configure the HTTP request pipeline ---
-var app = builder.Build();
-
-// Enable Swagger UI in Development environment
-if (app.Environment.IsDevelopment())
-{
-    app.UseDeveloperExceptionPage(); // Provides detailed error pages in development
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-else
-{
-    // Production error handling:
-    // This is a basic error handler. For production, you might have a more robust global exception handler middleware.
-    app.UseExceptionHandler("/error"); // Redirects to a generic error page/endpoint
-    app.UseHsts(); // Enforces HTTPS for security (HTTP Strict Transport Security)
-}
-
-app.UseHttpsRedirection(); // Redirects HTTP requests to HTTPS
-
-app.UseRouting(); // Enables endpoint routing
-
-app.UseAuthorization(); // Enables authorization middleware
-
-// Maps controller actions to incoming requests
-app.MapControllers();
-
-app.Run();
