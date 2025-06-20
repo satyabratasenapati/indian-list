@@ -164,17 +164,162 @@ public bool IsApplicable(TaxRule rule, DateTime date)
         }
 
 
-// Apply migrations on startup
-using (var scope = app.Services.CreateScope())
-{
-    var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    try
-    {
-        dbContext.Database.Migrate();
-        app.Logger.LogInformation("Database migrations applied successfully.");
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogError(ex, "An error occurred while applying database migrations.");
-    }
-}
+// --- NEW METHOD FOR OVERLAP CHECK ---
+        Task<bool> HasOverlappingTaxRuleAsync(
+            int municipalityId,
+            TaxType type,
+            DateTime newStartDate,
+            DateTime? newEndDate,
+            Guid? excludeRuleId = null, // Used for updates: exclude the rule being updated
+            int? dayOfMonth = null,     // For Monthly
+            DayOfWeek? dayOfWeek = null, // For Weekly
+            int? dayOfYear = null       // For Daily/Yearly specific dates
+        );
+
+
+
+// --- NEW IMPLEMENTATION FOR OVERLAP CHECK ---
+        public async Task<bool> HasOverlappingTaxRuleAsync(
+            int municipalityId,
+            TaxType type,
+            DateTime newStartDate,
+            DateTime? newEndDate,
+            Guid? excludeRuleId = null,
+            int? dayOfMonth = null,
+            DayOfWeek? dayOfWeek = null,
+            int? dayOfYear = null)
+        {
+            newStartDate = newStartDate.Date; // Ensure date only for comparison
+            newEndDate = newEndDate?.Date; // Ensure date only for comparison
+
+            IQueryable<TaxRule> query = _context.TaxRules
+                .Where(tr => tr.MunicipalityId == municipalityId && tr.Type == type);
+
+            // Exclude the current rule itself during updates
+            if (excludeRuleId.HasValue)
+            {
+                query = query.Where(tr => tr.Id != excludeRuleId.Value);
+            }
+
+            // Filter by specific date/day properties based on TaxType
+            switch (type)
+            {
+                case TaxType.Monthly:
+                    if (dayOfMonth.HasValue)
+                    {
+                        query = query.Where(tr => tr.DayOfMonth == dayOfMonth.Value);
+                    }
+                    break;
+                case TaxType.Weekly:
+                    if (dayOfWeek.HasValue)
+                    {
+                        query = query.Where(tr => tr.DayOfWeek == dayOfWeek.Value);
+                    }
+                    break;
+                case TaxType.Daily:
+                case TaxType.Yearly:
+                    // For Daily/Yearly, if they have a specific dayOfYear (i.e., a specific date rule)
+                    // If DayOfYear is provided, it implies a fixed date rule within the Yearly/Daily type,
+                    // so we filter by that. If not, it's a general yearly/daily rule.
+                    if (dayOfYear.HasValue)
+                    {
+                        query = query.Where(tr => tr.DayOfYear == dayOfYear.Value);
+                    }
+                    else if (type == TaxType.Daily) // Daily rules without DayOfYear must be exact date matches
+                    {
+                        // A daily rule typically means StartDate == EndDate and applies to that specific day.
+                        // If we are adding a new daily rule for a specific date, we check for an existing daily rule
+                        // on that exact date.
+                        query = query.Where(tr => tr.StartDate == newStartDate && tr.EndDate == newEndDate);
+                    }
+                    break;
+            }
+
+            // Check for date range overlap
+            // An overlap occurs if:
+            // (existing.StartDate <= new.EndDate) AND (existing.EndDate >= new.StartDate)
+            // Or if existing rule has no end date (open-ended)
+            // Or if new rule has no end date (open-ended)
+            // Or if both have no end date
+            var overlappingRules = await query.Where(tr =>
+                (tr.EndDate == null || newStartDate <= tr.EndDate) &&
+                (newEndDate == null || tr.StartDate <= newEndDate)
+            ).AnyAsync();
+
+            return overlappingRules;
+        }
+
+// Helper method for type-specific date validation (already existing)
+        private void ValidateTypeSpecificDates(TaxType type, DateTime startDate, DateTime? endDate, int? dayOfMonth, DayOfWeek? dayOfWeek, int? dayOfYear)
+        {
+            if (type == TaxType.Monthly)
+            {
+                if (!dayOfMonth.HasValue || dayOfMonth.Value < 1 || dayOfMonth.Value > 31)
+                {
+                    throw new ArgumentException("Monthly tax rule requires a valid DayOfMonth (1-31).");
+                }
+                if (dayOfWeek.HasValue || dayOfYear.HasValue)
+                {
+                    throw new ArgumentException("DayOfWeek or DayOfYear should not be provided for Monthly tax rules.");
+                }
+            }
+            else if (type == TaxType.Weekly)
+            {
+                if (!dayOfWeek.HasValue)
+                {
+                    throw new ArgumentException("Weekly tax rule requires a DayOfWeek.");
+                }
+                if (dayOfMonth.HasValue || dayOfYear.HasValue)
+                {
+                    throw new ArgumentException("DayOfMonth or DayOfYear should not be provided for Weekly tax rules.");
+                }
+            }
+            else if (type == TaxType.Daily)
+            {
+                if (startDate.Date != (endDate?.Date ?? startDate.Date)) // Ensure EndDate is same as StartDate for daily
+                {
+                    throw new ArgumentException("Daily tax rule must have the same StartDate and EndDate.");
+                }
+                if (dayOfMonth.HasValue || dayOfWeek.HasValue || dayOfYear.HasValue)
+                {
+                    // Daily rules are specific to a date, so specific DayOfMonth/Week/Year are redundant and discouraged
+                    // unless you intend specific daily rules only on certain day of years, which is better as Yearly with dayOfYear
+                    throw new ArgumentException("Specific DayOfMonth, DayOfWeek, or DayOfYear should not be provided for general Daily tax rules.");
+                }
+            }
+            else if (type == TaxType.Yearly)
+            {
+                // Yearly rules can be general (whole year) or specific to a DayOfYear (e.g., specific holiday tax)
+                // If DayOfYear is provided, it must be valid.
+                if (dayOfYear.HasValue && (dayOfYear.Value < 1 || dayOfYear.Value > 366)) // Max 366 for leap years
+                {
+                    throw new ArgumentException("Yearly tax rule with DayOfYear requires a valid DayOfYear (1-366).");
+                }
+                 if (dayOfMonth.HasValue || dayOfWeek.HasValue)
+                {
+                    throw new ArgumentException("DayOfMonth or DayOfWeek should not be provided for Yearly tax rules.");
+                }
+            }
+        }
+
+// --- Existing Type-specific validation (DayOfMonth/Week/Year) ---
+            ValidateTypeSpecificDates(command.Type, command.StartDate, command.EndDate, command.DayOfMonth, command.DayOfWeek, command.DayOfYear);
+
+            // --- NEW: OVERLAP VALIDATION FOR ADD ---
+            bool isOverlapping = await _repository.HasOverlappingTaxRuleAsync(
+                municipality.Id,
+                command.Type,
+                command.StartDate,
+                command.EndDate,
+                null, // No excludeId for add operation
+                command.DayOfMonth,
+                command.DayOfWeek,
+                command.DayOfYear
+            );
+
+            if (isOverlapping)
+            {
+                _logger.LogWarning("Attempted to add an overlapping tax rule for Municipality: {MunicipalityName}, Type: {TaxType}", command.MunicipalityName, command.Type);
+                throw new InvalidOperationException($"A tax rule for '{command.MunicipalityName}' of type '{command.Type}' already exists for the specified period/day.");
+            }
+            // --- END NEW OVERLAP VALIDATION ---
