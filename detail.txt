@@ -113,114 +113,194 @@ Update-Database -Project MunicipalityTax.Infrastructure -StartupProject Municipa
 
 
 
-public class BaseController : Controller
-{
-    public IMicroServiceLogger _logger;
-
-    public BaseController(IMicroServiceLogger Logger)
+public abstract class BaseController<TController> : ControllerBase where TController : ControllerBase
     {
-        _logger = Logger;
-    }
+        // DIRECTLY USE ILogger<TController>
+        protected readonly ILogger<TController> _logger;
 
-    protected IActionResult GetHttpResponse(Func<IActionResult> codeToExecute)
-    {
-        IActionResult result = null;
-        try
+        // Constructor now injects ILogger<TController>
+        protected BaseController(ILogger<TController> logger)
         {
-            result = codeToExecute.Invoke();
+            _logger = logger;
         }
-        catch (MicroServiceException sbe)
-        {
-            // string errorMessage = GetErrorMessage(sbe);
-            string errorMessage = RESError.ResourceManager.GetString(sbe.ErrorCode);
-            _logger.Warn(errorMessage);
-            return BadRequest(new RequestResult
-            {
-                Success = false,
-                Error = new ErrorDetail() { Message = errorMessage }
-            });
-        }
-        catch(WorkflowException wfExptn)
-        {
-            _logger.Warn(wfExptn.Message);
-            return BadRequest(new RequestResult
-            {
-                Success = false,
-                Error = new ErrorDetail() { Message = wfExptn.Message }
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.Error(ex.StackTrace);
-            return BadRequest(new RequestResult
-            {
-                Success = false,
-                Error = new ErrorDetail() { Message = ex?.Message ?? "There was a problem handling your request.Please contact support."}
-            });
-        }
-        string APIName = this.ControllerContext.RouteData.Values["controller"].ToString() + "/" + this.ControllerContext.RouteData.Values["action"].ToString();
-        _logger.Info(APIName);
-        return result;
-    }
 
-    #region Error code reading
-    private string GetErrorMessage(MicroServiceException _microServiceException)
-    {
-        if (_microServiceException.SubstitutionParams == null)
+        // --- Core Method to Wrap Controller Action Logic (no changes needed here beyond logger type) ---
+        protected async Task<IActionResult> GetHttpResponseAsync<TResult>(Func<Task<TResult>> codeToExecute)
         {
-            if (!String.IsNullOrEmpty(_microServiceException.ErrorMessage))
+            try
             {
-                return _microServiceException.ErrorMessage;
+                TResult resultData = await codeToExecute.Invoke();
+                return Ok(new RequestResult
+                {
+                    Success = true,
+                    Data = resultData
+                });
+            }
+            catch (MicroServiceException sbe)
+            {
+                string errorMessage = GetErrorMessage(sbe);
+                _logger.LogWarning(errorMessage); // Use LogWarning for ILogger
+                return BadRequest(new RequestResult
+                {
+                    Success = false,
+                    Error = new ErrorDetail() { Message = errorMessage, Code = sbe.ErrorCode }
+                });
+            }
+            catch (WorkflowException wfExptn)
+            {
+                _logger.LogWarning(wfExptn.Message); // Use LogWarning for ILogger
+                return BadRequest(new RequestResult
+                {
+                    Success = false,
+                    Error = new ErrorDetail() { Message = wfExptn.Message, Code = "WORKFLOW_ERROR" }
+                });
+            }
+            catch (ArgumentException argEx)
+            {
+                _logger.LogWarning(argEx.Message); // Use LogWarning for ILogger
+                return BadRequest(new RequestResult
+                {
+                    Success = false,
+                    Error = new ErrorDetail() { Message = argEx.Message, Code = "INVALID_ARGUMENT" }
+                });
+            }
+            catch (InvalidOperationException invOpEx)
+            {
+                _logger.LogWarning(invOpEx.Message); // Use LogWarning for ILogger
+                return BadRequest(new RequestResult
+                {
+                    Success = false,
+                    Error = new ErrorDetail() { Message = invOpEx.Message, Code = "BUSINESS_RULE_VIOLATION" }
+                });
+            }
+            catch (Exception ex)
+            {
+                string apiName = GetCurrentApiName();
+                // Use LogError for ILogger, passing the exception object
+                _logger.LogError(ex, "An unhandled exception occurred in API: {APIName} - {Message}", apiName, ex.Message);
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    new RequestResult
+                    {
+                        Success = false,
+                        Error = new ErrorDetail() { Message = "An unexpected error occurred. Please contact support.", Code = "INTERNAL_SERVER_ERROR" }
+                    }
+                );
+            }
+        }
+
+        protected async Task<IActionResult> GetHttpResponseAsync(Func<Task> codeToExecute, int successStatusCode = StatusCodes.Status200OK)
+        {
+            try
+            {
+                await codeToExecute.Invoke();
+                return StatusCode(successStatusCode, new RequestResult { Success = true });
+            }
+            catch (MicroServiceException sbe)
+            {
+                string errorMessage = GetErrorMessage(sbe);
+                _logger.LogWarning(errorMessage);
+                return BadRequest(new RequestResult
+                {
+                    Success = false,
+                    Error = new ErrorDetail() { Message = errorMessage, Code = sbe.ErrorCode }
+                });
+            }
+            catch (WorkflowException wfExptn)
+            {
+                _logger.LogWarning(wfExptn.Message);
+                return BadRequest(new RequestResult
+                {
+                    Success = false,
+                    Error = new ErrorDetail() { Message = wfExptn.Message, Code = "WORKFLOW_ERROR" }
+                });
+            }
+             catch (ArgumentException argEx)
+            {
+                _logger.LogWarning(argEx.Message);
+                return BadRequest(new RequestResult
+                {
+                    Success = false,
+                    Error = new ErrorDetail() { Message = argEx.Message, Code = "INVALID_ARGUMENT" }
+                });
+            }
+            catch (InvalidOperationException invOpEx)
+            {
+                _logger.LogWarning(invOpEx.Message);
+                return BadRequest(new RequestResult
+                {
+                    Success = false,
+                    Error = new ErrorDetail() { Message = invOpEx.Message, Code = "BUSINESS_RULE_VIOLATION" }
+                });
+            }
+            catch (Exception ex)
+            {
+                string apiName = GetCurrentApiName();
+                _logger.LogError(ex, "An unhandled exception occurred in API (no return value): {APIName} - {Message}", apiName, ex.Message);
+                return StatusCode(
+                    StatusCodes.Status500InternalServerError,
+                    new RequestResult
+                    {
+                        Success = false,
+                        Error = new ErrorDetail() { Message = "An unexpected error occurred. Please contact support.", Code = "INTERNAL_SERVER_ERROR" }
+                    }
+                );
+            }
+        }
+
+        // Helper to get API name for logging
+        private string GetCurrentApiName()
+        {
+            var controllerName = ControllerContext.RouteData.Values["controller"]?.ToString();
+            var actionName = ControllerContext.RouteData.Values["action"]?.ToString();
+            return $"{controllerName}/{actionName}";
+        }
+
+        #region Error code reading (adapted)
+        protected string GetErrorMessage(MicroServiceException _microServiceException)
+        {
+            if (_microServiceException.SubstitutionParams == null || _microServiceException.SubstitutionParams.Length == 0)
+            {
+                return !String.IsNullOrEmpty(_microServiceException.ErrorMessage)
+                       ? _microServiceException.ErrorMessage
+                       : GetMessageForCode(_microServiceException.ErrorCode);
             }
             else
             {
-                return GetMessageForCode(_microServiceException.ErrorCode);
+                string formatString = !String.IsNullOrEmpty(_microServiceException.ErrorMessage)
+                                      ? _microServiceException.ErrorMessage
+                                      : GetMessageForCode(_microServiceException.ErrorCode);
+                return string.Format(formatString, _microServiceException.SubstitutionParams);
             }
         }
-        else
+
+        protected string GetMessageForCode(string errorCode)
         {
-            if (!String.IsNullOrEmpty(_microServiceException.ErrorMessage))
+            try
             {
-                return string.Format(_microServiceException.ErrorMessage, _microServiceException.SubstitutionParams);
+                return RESError.ResourceManager.GetString(errorCode) ?? GetDefaultErrorMessage();
             }
-            else
+            catch (Exception ex)
             {
-                string errorMessage = GetMessageForCode(_microServiceException.ErrorCode);
-                //Now replace the parameters
-                if (_microServiceException.SubstitutionParams.Length > 1)
-                {
-                    return string.Format(_microServiceException.ErrorMessage, _microServiceException.SubstitutionParams);
-                }
-                else
-                {
-                    return string.Format(errorMessage, _microServiceException.SubstitutionParams);
-                }
+                _logger.LogError(ex, "Failed to retrieve error message for code: {ErrorCode}", errorCode); // Use LogError
+                return GetDefaultErrorMessage();
             }
         }
 
-    }
-
-    private string GetMessageForCode(string errorCode)
-    {
-        string value = String.Empty;
-        try
+        protected static string GetDefaultErrorMessage()
         {
-            value = RESError.ResourceManager.GetString(errorCode);
+            return RESError.ResourceManager.GetString(RESError.ERROR_GENERIC) ?? "An unexpected error occurred. Please contact support.";
         }
-        catch (MicroServiceException)
-        {
-            value = GetDefaultErrorMessage();
-        }
-        return value;
+        #endregion
     }
-
-    private static string GetDefaultErrorMessage()
-    {
-        return RESError.ResourceManager.GetString(Constant.ERROR_GENERIC);
-    } 
-    #endregion
 }
-
+public MunicipalityController(
+            MunicipalityManagementService managementService,
+            ILogger<MunicipalityController> logger) // NOW INJECT ILogger<T>
+            : base(logger) // Pass it to the base constructor
+        {
+            _managementService = managementService;
+        }
 return GetHttpResponse(() =>
 {
     string ClientApplicationURL = string.Empty, paymentFailedReturnUrl = string.Empty;
