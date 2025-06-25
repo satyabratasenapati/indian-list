@@ -113,224 +113,74 @@ Update-Database -Project MunicipalityTax.Infrastructure -StartupProject Municipa
 
 
 
-// MunicipalityTax.API/Controllers/BaseController.cs
-using Microsoft.AspNetCore.Mvc;
-using MunicipalityTax.API.Models; // For RequestResult, ErrorDetail
-// using MunicipalityTax.Domain.Exceptions; // MicroServiceException is removed, so this might not be needed depending on other custom exceptions
-using System;
-using System.Resources; // Potentially remove if RESError completely goes away
-using System.Reflection; // Potentially remove if RESError completely goes away
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Logging;
+# Visual Studio 2015+ and other IDEs
+.vs/
+.idea/             # JetBrains Rider
+.vscode/           # Visual Studio Code
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
 
-// Removed RESErrorNamespace if it's no longer used for any error code lookup
-// If you still need a generic error message resource, you can keep a simplified RESError.
-// For now, let's assume direct strings are used for default messages.
+# Build results
+**/[Bb]in/         # bin folders in any directory
+**/[Oo]bj/         # obj folders in any directory
+**/[Dd]ebug/
+**/[Rr]elease/
+**/build/
+**/[Oo]ut/
+*.log
+*.ide.log
+*.opendb
+*.pdb
+*.tmp
+*.csproj.user
+*.vcxproj.user
+*.fsproj.user
 
-namespace MunicipalityTax.API.Controllers
-{
-    public abstract class BaseController<TController> : ControllerBase where TController : ControllerBase
-    {
-        protected readonly ILogger<TController> _logger;
+# NuGet packages
+packages/          # Older style NuGet packages folder
+*.nupkg
+*.snupkg
 
-        protected BaseController(ILogger<TController> logger)
-        {
-            _logger = logger;
-        }
+# DotNet Core specific
+project.lock.json
+project.fragment.lock.json
+publish/           # Output of dotnet publish
+.config/           # Local tools config
+*.g.cs             # Generated C# files (e.g., from T4 templates, protobuf, etc.)
+*.Designer.cs.bak  # Backup files for designer generated code
 
-        // --- Overload 1: For actions that return data on success ---
-        protected async Task<IActionResult> GetHttpResponseAsync<TResult>(
-            Func<Task<TResult>> codeToExecute,
-            int successStatusCode = StatusCodes.Status200OK,
-            string? successMessage = null) // Optional success message
-        {
-            try
-            {
-                TResult resultData = await codeToExecute.Invoke();
+# Configuration files
+appsettings.Development.json    # Local development settings (keep this out of source control if it contains secrets or local paths)
+# appsettings.Production.json   # Uncomment if you manage production settings via CI/CD, not source control
+# appsettings.Staging.json      # Uncomment if you manage staging settings via CI/CD, not source control
+# web.config.user               # If applicable for older ASP.NET projects
+.editorconfig                     # If you want to keep this out of source control
 
-                return StatusCode(successStatusCode, new RequestResult
-                {
-                    Success = true,
-                    Data = resultData,
-                    Message = successMessage // Use the new Message property
-                });
-            }
-            // Removed catch (MicroServiceException sbe)
-            catch (ArgumentException argEx)
-            {
-                _logger.LogWarning("Bad Request (ArgumentException): {Message}", argEx.Message);
-                return BadRequest(new RequestResult
-                {
-                    Success = false,
-                    Message = "Invalid request parameter.", // General message for user
-                    Error = new ErrorDetail() { Message = argEx.Message, Code = "INVALID_ARGUMENT" } // Detailed message for developer/logs
-                });
-            }
-            catch (InvalidOperationException invOpEx)
-            {
-                _logger.LogWarning("Bad Request (InvalidOperationException): {Message}", invOpEx.Message);
-                return BadRequest(new RequestResult
-                {
-                    Success = false,
-                    Message = "A business operation could not be completed.", // General message for user
-                    Error = new ErrorDetail() { Message = invOpEx.Message, Code = "BUSINESS_RULE_VIOLATION" } // Detailed message for developer/logs
-                });
-            }
-            catch (Exception ex)
-            {
-                string apiName = GetCurrentApiName();
-                _logger.LogError(ex, "An unhandled exception occurred in API: {APIName}", apiName); // Log the full exception object
-                return StatusCode(
-                    StatusCodes.Status500InternalServerError,
-                    new RequestResult
-                    {
-                        Success = false,
-                        Message = "An unexpected error occurred. Please contact support.", // General message for user
-                        Error = new ErrorDetail() { Message = "Internal Server Error", Code = "INTERNAL_SERVER_ERROR" } // Simple error for client
-                    }
-                );
-            }
-        }
+# Test Results
+[Tt]estResults/
+.trx
 
-        // --- Overload 2: For actions that don't return specific data (e.g., just confirmation) ---
-        protected async Task<IActionResult> GetHttpResponseAsync(
-            Func<Task> codeToExecute,
-            int successStatusCode = StatusCodes.Status200OK,
-            string? successMessage = null)
-        {
-            try
-            {
-                await codeToExecute.Invoke();
+# ReSharper / Code Analysis
+*.DotSettings.user
+*.DotSettings
+*.resharper
+*.resharper.user
+*.[Cc]odeAnalysisLog.xml
 
-                return StatusCode(successStatusCode, new RequestResult
-                {
-                    Success = true,
-                    Message = successMessage // Use the new Message property
-                });
-            }
-            // Removed catch (MicroServiceException sbe)
-            catch (ArgumentException argEx)
-            {
-                _logger.LogWarning("Bad Request (ArgumentException): {Message}", argEx.Message);
-                return BadRequest(new RequestResult
-                {
-                    Success = false,
-                    Message = "Invalid request parameter.",
-                    Error = new ErrorDetail() { Message = argEx.Message, Code = "INVALID_ARGUMENT" }
-                });
-            }
-            catch (InvalidOperationException invOpEx)
-            {
-                _logger.LogWarning("Bad Request (InvalidOperationException): {Message}", invOpEx.Message);
-                return BadRequest(new RequestResult
-                {
-                    Success = false,
-                    Message = "A business operation could not be completed.",
-                    Error = new ErrorDetail() { Message = invOpEx.Message, Code = "BUSINESS_RULE_VIOLATION" }
-                });
-            }
-            catch (Exception ex)
-            {
-                string apiName = GetCurrentApiName();
-                _logger.LogError(ex, "An unhandled exception occurred in API (no return value): {APIName}", apiName);
-                return StatusCode(
-                    StatusCodes.Status500InternalServerError,
-                    new RequestResult
-                    {
-                        Success = false,
-                        Message = "An unexpected error occurred. Please contact support.",
-                        Error = new ErrorDetail() { Message = "Internal Server Error", Code = "INTERNAL_SERVER_ERROR" }
-                    }
-                );
-            }
-        }
+# Node.js / Yarn (if you add a frontend project within the solution)
+node_modules/
+npm-debug.log
+yarn-debug.log
+.yarn-integrity
 
-        // Helper to get API name for logging (unchanged)
-        private string GetCurrentApiName()
-        {
-            var controllerName = ControllerContext.RouteData.Values["controller"]?.ToString();
-            var actionName = ControllerContext.RouteData.Values["action"]?.ToString();
-            return $"{controllerName}/{actionName}";
-        }
+# Operating System Files
+.DS_Store          # macOS
+Thumbs.db          # Windows
+desktop.ini        # Windows
 
-        // REMOVED: #region Error code reading and its methods (GetErrorMessage, GetMessageForCode, GetDefaultErrorMessage)
-    }
-}
-public MunicipalityController(
-            MunicipalityManagementService managementService,
-            ILogger<MunicipalityController> logger) // NOW INJECT ILogger<T>
-            : base(logger) // Pass it to the base constructor
-        {
-            _managementService = managementService;
-        }
-
-
-// MunicipalityTax.API/Controllers/MunicipalityController.cs (Example)
-// ...
-        public async Task<IActionResult> AddTaxRule([FromBody] AddTaxRuleCommand command)
-        {
-            if (!ModelState.IsValid)
-            {
-                _logger.LogWarning("Invalid AddTaxRuleCommand received. Validation errors: {ValidationErrors}", ModelState); // Log ModelState
-                return BadRequest(new RequestResult { Success = false, Message = "Invalid input data." }); // Use Message property
-            }
-
-            return await GetHttpResponseAsync(
-                async () =>
-                {
-                    await _managementService.AddNewTaxRuleAsync(command);
-                },
-                StatusCodes.Status201Created,
-                "Tax rule added successfully."
-            );
-        }
-// ...
-
-
-[HttpGet("tax")]
-        [ProducesResponseType(StatusCodes.Status200OK)]
-        [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> GetTax([FromQuery] string municipalityName, [FromQuery] DateTime date)
-        {
-            if (string.IsNullOrWhiteSpace(municipalityName))
-            {
-                _logger.LogWarning("GetTax: Municipality name is required.");
-                return BadRequest(new RequestResult { Success = false, Error = new ErrorDetail { Message = "Municipality name is required." } });
-            }
-
-            return await GetHttpResponseAsync<object>(
-                async () => // Function to execute, returning an object
-                {
-                    decimal totalTax = await _taxCalculationService.GetTaxAsync(municipalityName, date);
-                    return new { municipalityName, date = date.ToShortDateString(), totalTax };
-                },
-                StatusCodes.Status200OK, // Explicitly state 200 OK (could omit for default)
-                "Tax calculation successful." // Provide a success message
-            );
-        }
-
-old code
-return GetHttpResponse(() =>
-{
-    string ClientApplicationURL = string.Empty, paymentFailedReturnUrl = string.Empty;
-    ClientApplicationURL = _iconfiguration.GetSection("ClientApplicationURL").Value;
-    paymentFailedReturnUrl = _paymentService.GetClientPaymentFailureUrl();
-    if (Request != null && !string.IsNullOrEmpty(i))
-    {
-
-        EasyPayResponseParam easyPayResponse = _paymentService.DecryptPaymentResponse(i);
-
-        _paymentService.DoPostPaymentActivity(ref easyPayResponse);
-
-
-        string returnUrl = _paymentService.GetClientReturnUrl(easyPayResponse);
-
-
-        //Send to the client in query param
-        return RedirectPermanent(ClientApplicationURL + returnUrl);
-    }
-    else
-    {
-        return BadRequestRedirect(ClientApplicationURL, paymentFailedReturnUrl);
-    }
-});
+# Misc files
+*.sqlite           # SQLite database files (if used locally and not meant for version control)
+*.db
+*.bak
